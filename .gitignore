@@ -1,0 +1,11 @@
+# Xcode build
+Secretary/build/
+DerivedData/
+*.xcuserdata
+
+# SPM
+.build/
+.swiftpm/
+
+# OS
+.DS_Store
