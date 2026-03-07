@@ -2,7 +2,9 @@ import SwiftUI
 
 struct ChatView: View {
     @StateObject private var viewModel = ChatViewModel()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
+    @State private var isNearBottom = true
 
     var body: some View {
         NavigationStack {
@@ -15,19 +17,25 @@ struct ChatView: View {
                                 MessageBubbleView(message: message)
                                     .id(message.id)
                             }
+                            // Anchor at the very bottom for scroll tracking
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom")
+                                .onAppear { isNearBottom = true }
+                                .onDisappear { isNearBottom = false }
                         }
                         .padding()
                     }
                     .onChange(of: viewModel.messages.count) { _, _ in
-                        if let last = viewModel.messages.last {
+                        if isNearBottom, let last = viewModel.messages.last {
                             withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo(last.id, anchor: .bottom)
                             }
                         }
                     }
                     .onChange(of: viewModel.messages.last?.text) { _, _ in
-                        if let last = viewModel.messages.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+                        if isNearBottom {
+                            proxy.scrollTo("bottom")
                         }
                     }
                 }
@@ -84,6 +92,9 @@ struct ChatView: View {
             }
             .onAppear {
                 viewModel.setup()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                viewModel.handleScenePhase(newPhase)
             }
         }
     }

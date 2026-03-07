@@ -2,7 +2,7 @@ name: Secretary
 options:
   bundleIdPrefix: com.secretary
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
   xcodeVersion: "16.0"
   createIntermediateGroups: true
 
@@ -56,3 +56,7 @@ targets:
         UILaunchScreen:
           UIColorName: ""
         NSCalendarsFullAccessUsageDescription: "Secretary needs calendar access to manage your events."
+        UIBackgroundModes:
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.secretary.ios.agent

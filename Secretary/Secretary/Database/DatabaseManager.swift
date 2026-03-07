@@ -9,18 +9,32 @@ final class DatabaseManager: Sendable {
 
     static let shared: DatabaseManager = {
         let path = databasePath()
-        do {
-            return try DatabaseManager(path: path)
-        } catch {
-            logger.error("Database corrupted, resetting: \(error)")
-            try? FileManager.default.removeItem(atPath: path)
-            try? FileManager.default.removeItem(atPath: path + "-wal")
-            try? FileManager.default.removeItem(atPath: path + "-shm")
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: DatabaseManager.databaseResetNotification, object: nil)
+        NSLog("[DatabaseManager] Opening database at: %@", path)
+        NSLog("[DatabaseManager] DB exists: %d, WAL exists: %d, SHM exists: %d",
+              FileManager.default.fileExists(atPath: path) ? 1 : 0,
+              FileManager.default.fileExists(atPath: path + "-wal") ? 1 : 0,
+              FileManager.default.fileExists(atPath: path + "-shm") ? 1 : 0)
+        // Retry once — a stale WAL from a killed process can cause a transient
+        // open failure that resolves after SQLite replays the journal.
+        for attempt in 1...2 {
+            do {
+                let mgr = try DatabaseManager(path: path)
+                NSLog("[DatabaseManager] Opened successfully on attempt %d", attempt)
+                return mgr
+            } catch {
+                NSLog("[DatabaseManager] Open FAILED attempt %d: %@", attempt, "\(error)")
+                if attempt == 1 { continue }
+                // Final attempt failed — nuke and recreate
+                NSLog("[DatabaseManager] Resetting database after repeated failure")
+                try? FileManager.default.removeItem(atPath: path)
+                try? FileManager.default.removeItem(atPath: path + "-wal")
+                try? FileManager.default.removeItem(atPath: path + "-shm")
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: DatabaseManager.databaseResetNotification, object: nil)
+                }
             }
-            return try! DatabaseManager(path: path)
         }
+        return try! DatabaseManager(path: path)
     }()
 
     init(path: String) throws {
@@ -36,8 +50,12 @@ final class DatabaseManager: Sendable {
 
         dbQueue = try DatabaseQueue(path: path, configuration: config)
 
-        try dbQueue.write { db in
+        // Set WAL mode outside a transaction — can't switch journal mode inside one
+        try dbQueue.writeWithoutTransaction { db in
             try db.execute(sql: "PRAGMA journal_mode=WAL")
+        }
+
+        try dbQueue.write { db in
             try Schema.create(in: db)
         }
     }
