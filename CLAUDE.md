@@ -11,7 +11,7 @@ xcodegen generate
 # Build:
 xcodebuild -project Secretary.xcodeproj -scheme Secretary -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
-- Swift 6.0, iOS 17.0 deployment target
+- Swift 6.0, iOS 26.0 deployment target
 - XcodeGen project defined in `Secretary/project.yml`
 - SPM dependencies: GRDB, SwiftSoup, KeychainAccess, SwiftAnthropic (≥2.2.0)
 - Build flag: `-DSQLITE_ENABLE_FTS5` (required for GRDB FTS5 support)
@@ -124,6 +124,39 @@ Break `StatementArguments([large dict literal])` into a separate `let args: [Str
 @preconcurrency import SwiftAnthropic
 ```
 
+### @MainActor closures escape to background queues
+The `App` protocol is `@MainActor`. Closures defined in `App.init()` inherit `@MainActor` isolation. If those closures are called on background queues (e.g., BGTask handlers), Swift 6 runtime traps with `EXC_BREAKPOINT` in `dispatch_assert_queue_fail`. **Fix**: move registration to a `nonisolated static func`:
+```swift
+init() { Self.registerBackgroundTask() }
+nonisolated static func registerBackgroundTask() {
+    BGTaskScheduler.shared.register(...) { task in /* not @MainActor */ }
+}
+```
+
+### PRAGMA journal_mode=WAL must be outside a transaction
+`PRAGMA journal_mode=WAL` fails inside a transaction. GRDB's `db.write { }` wraps in a transaction. Use `writeWithoutTransaction` instead:
+```swift
+try dbQueue.writeWithoutTransaction { db in
+    try db.execute(sql: "PRAGMA journal_mode=WAL")
+}
+```
+
+## Background Execution — BGContinuedProcessingTask (iOS 26+)
+
+### Architecture
+- `SecretaryApp.registerBackgroundTask()` — registers handler (must be `nonisolated static`)
+- `BackgroundTaskCoordinator` — thread-safe singleton (`@unchecked Sendable` + NSLock), NOT `@MainActor`
+- `ChatViewModel.beginBackgroundProcessing()` — submits BGContinuedProcessingTaskRequest, falls back to `beginBackgroundTask` on Simulator
+- `ChatViewModel.endBackgroundProcessing()` — calls `markFinished()` to unblock the handler
+
+### Critical rules
+1. **Handler MUST block** — returning immediately from the BGTask handler causes SIGTRAP. Use `while !isFinished && !wasExpired { sleep(1) }`
+2. **Handler must NOT be @MainActor** — see concurrency section above
+3. **Not supported on Simulator** — submit() throws `BGTaskSchedulerErrorCodeUnavailable` (code 1). Always fall back to `beginBackgroundTask`
+4. **No UIBackgroundModes needed** — `BGContinuedProcessingTask` does NOT require `UIBackgroundModes: processing` in Info.plist
+5. **Identifier pattern** — use `$(PRODUCT_BUNDLE_IDENTIFIER).background` in Info.plist, `"\(Bundle.main.bundleIdentifier!).background"` in code
+6. **Set `request.strategy = .queue`** explicitly
+
 ## Runtime Pitfalls — Lessons from Debugging
 
 ### Swift `Data` slicing is index-unsafe
@@ -146,23 +179,22 @@ After cancelling mid-tool-execution, orphaned `tool_use` blocks in the conversat
 
 ## Diagnostics
 
-Useful commands for debugging on simulator:
+### Simulator
 ```bash
-# Screenshot
 xcrun simctl io booted screenshot /tmp/sim.png
-
-# CPU profiling (find PID with `xcrun simctl spawn booted launchctl list`)
 sample <pid> 3
-
-# Crash reports
 ls ~/Library/Logs/DiagnosticReports/Secretary-*.ips
-
-# Examine SQLite DB
-xcrun simctl get_app_container booted com.secretary.app data
+xcrun simctl get_app_container booted com.secretary.ios data
 sqlite3 <container>/Library/Application\ Support/Secretary/secretary.db
-
-# System log
 log show --predicate 'subsystem == "Secretary"' --last 5m
+```
+
+### Device (UDID: 00008150-0002456A0C47801C)
+```bash
+# Install and launch with console output
+xcrun devicectl device install app --device 00008150-0002456A0C47801C <path-to>.app
+xcrun devicectl device process launch --device 00008150-0002456A0C47801C --console com.secretary.ios
+# Use NSLog (not os.Logger) — NSLog shows up in --console output reliably
 ```
 
 ## Future: macOS Messages Companion
