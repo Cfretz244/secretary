@@ -46,6 +46,7 @@
 		BC6800D1FF6F248D4D1C9916 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = 7737ADE7FD0914CAE2D60447 /* SwiftSoup */; };
 		BEAC86D3A5BBBC7B1E756727 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73DFEA4A3B4685A5D02E6173 /* OnboardingView.swift */; };
 		CDF1B18ABD7FC466FEEC8061 /* RulesEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BADEE0C736AB0F96E8BA3D1 /* RulesEngine.swift */; };
+		CEA610FFB9B4DE431932D0C1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0C71E57BB38FF4F2B2AD7A70 /* Assets.xcassets */; };
 		CF5333B9B0D477F258131DE6 /* FolderRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71DD6254474C6463656219C0 /* FolderRepository.swift */; };
 		D3C5FC3A3949B42C85029F35 /* String+Email.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9820DBC4CE6CA94323B75F27 /* String+Email.swift */; };
 		E53A21D07CD306FA2CE1614B /* MessageBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 420531A2857DF979E0EE3F8E /* MessageBubbleView.swift */; };
@@ -59,6 +60,7 @@
 /* Begin PBXFileReference section */
 		004AFFE5ABD284F0351039C8 /* SearchRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchRepository.swift; sourceTree = "<group>"; };
 		01D2E7C6C8F5F27E18B149D9 /* Migrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migrations.swift; sourceTree = "<group>"; };
+		0C71E57BB38FF4F2B2AD7A70 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		11A2421BE2F18FAFE3FDC68B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1F55E435EEA053AFAF005F29 /* Data+IMAP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Data+IMAP.swift"; sourceTree = "<group>"; };
 		24EAC2486C63311725C54BA7 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
@@ -301,6 +303,7 @@
 		F8E0B586C54BD2E7BB66898B /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				0C71E57BB38FF4F2B2AD7A70 /* Assets.xcassets */,
 				11A2421BE2F18FAFE3FDC68B /* Info.plist */,
 			);
 			path = Resources;
@@ -314,6 +317,7 @@
 			buildConfigurationList = 601608F86F62D9B3AC3A6641 /* Build configuration list for PBXNativeTarget "Secretary" */;
 			buildPhases = (
 				EAE522FD439BECE35C2A5E48 /* Sources */,
+				ADCDBC8611985BD1E3D421BE /* Resources */,
 				C1BA11646FC86939632ABF82 /* Frameworks */,
 			);
 			buildRules = (
@@ -370,6 +374,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		ADCDBC8611985BD1E3D421BE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CEA610FFB9B4DE431932D0C1 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		EAE522FD439BECE35C2A5E48 /* Sources */ = {

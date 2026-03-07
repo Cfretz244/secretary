@@ -40,7 +40,8 @@ struct SecretaryApp: App {
                 sleep(1)
             }
 
-            continuedTask.setTaskCompleted(success: !wasExpired)
+            // Always report success — expiration is handled gracefully
+            continuedTask.setTaskCompleted(success: true)
             BackgroundTaskCoordinator.shared.task = nil
         }
     }

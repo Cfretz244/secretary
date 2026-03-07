@@ -28,10 +28,84 @@ final class ChatViewModel: ObservableObject {
         let toolExecutor = ToolExecutor(db: db, calendarService: calendarService)
         agentLoop = AgentLoop(claudeService: claudeService, toolExecutor: toolExecutor, db: db)
 
+        loadConversationHistory()
+
         NotificationCenter.default.addObserver(forName: DatabaseManager.databaseResetNotification,
                                                object: nil, queue: .main) { [weak self] _ in
+            self?.messages.removeAll()
             self?.messages.append(ChatMessage(role: .assistant,
                 text: "The local database was corrupted and has been reset. Your email will need to be re-synced."))
+        }
+    }
+
+    private func loadConversationHistory() {
+        let sid = sessionId
+        do {
+            let turns: [ConversationTurn] = try db.read { db in
+                try ConversationRepository.getHistory(db, sessionId: sid)
+            }
+            guard !turns.isEmpty else { return }
+
+            var restored: [ChatMessage] = []
+            // Track tool_use IDs to their names for tool call display
+            var toolNames: [String: String] = [:]
+
+            for turn in turns {
+                switch turn.role {
+                case "user":
+                    restored.append(ChatMessage(role: .user, text: turn.content))
+
+                case "assistant":
+                    if let last = restored.last, last.role == .assistant {
+                        restored[restored.count - 1].text += turn.content
+                    } else {
+                        restored.append(ChatMessage(role: .assistant, text: turn.content))
+                    }
+
+                case "tool_use":
+                    guard let toolCallId = turn.toolCallId else { continue }
+                    // Parse the tool name from the stored JSON
+                    var name = "tool"
+                    if let data = turn.content.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        name = parsed["name"] as? String ?? "tool"
+                    }
+                    toolNames[toolCallId] = name
+                    // Ensure there's an assistant message to attach to
+                    if restored.isEmpty || restored.last?.role != .assistant {
+                        restored.append(ChatMessage(role: .assistant, text: ""))
+                    }
+                    restored[restored.count - 1].toolCalls.append(
+                        ChatMessage.ToolCallStatus(id: toolCallId, name: name, status: .running, detail: nil)
+                    )
+
+                case "tool_result":
+                    guard let toolCallId = turn.toolCallId else { continue }
+                    // Mark the tool call as completed
+                    for i in restored.indices.reversed() {
+                        if let idx = restored[i].toolCalls.firstIndex(where: { $0.id == toolCallId }) {
+                            restored[i].toolCalls[idx].status = .completed
+                            break
+                        }
+                    }
+
+                default:
+                    break
+                }
+            }
+
+            // Mark any still-running tool calls as completed (they're historical)
+            for i in restored.indices {
+                for j in restored[i].toolCalls.indices {
+                    if restored[i].toolCalls[j].status == .running {
+                        restored[i].toolCalls[j].status = .completed
+                    }
+                }
+            }
+
+            messages = restored
+        } catch {
+            NSLog("[ChatViewModel] Failed to load conversation history: %@", "\(error)")
         }
     }
 
@@ -65,6 +139,7 @@ final class ChatViewModel: ObservableObject {
                 switch event {
                 case .textDelta(let delta):
                     messages[assistantIndex].text += delta
+                    BackgroundTaskCoordinator.shared.updateSubtitle("Responding...")
 
                 case .toolStart(let name, let id):
                     messages[assistantIndex].toolCalls.append(
@@ -152,6 +227,26 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    private func handleBackgroundExpiration() {
+        runningTask?.cancel()
+        runningTask = nil
+        Task {
+            await agentLoop?.cancel()
+        }
+        isStreaming = false
+        endBackgroundProcessing()
+        if let lastIdx = messages.indices.last, messages[lastIdx].role == .assistant {
+            for i in messages[lastIdx].toolCalls.indices {
+                if messages[lastIdx].toolCalls[i].status == .running {
+                    messages[lastIdx].toolCalls[i].status = .failed("Background time expired")
+                }
+            }
+            if messages[lastIdx].text.isEmpty {
+                messages[lastIdx].text = "Background time expired. Open the app to continue."
+            }
+        }
+    }
+
     // MARK: - Background processing
 
     private func beginBackgroundProcessing() {
@@ -164,7 +259,7 @@ final class ChatViewModel: ObservableObject {
         request.strategy = .queue
 
         BackgroundTaskCoordinator.shared.onExpiration = { [weak self] in
-            self?.stopStreaming()
+            self?.handleBackgroundExpiration()
         }
 
         do {
