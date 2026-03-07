@@ -35,6 +35,7 @@ targets:
         SWIFT_VERSION: "6.0"
         OTHER_SWIFT_FLAGS: "-DSQLITE_ENABLE_FTS5"
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 44KC9KSGZQ
         SWIFT_STRICT_CONCURRENCY: minimal
     dependencies:
       - package: GRDB
@@ -56,7 +57,5 @@ targets:
         UILaunchScreen:
           UIColorName: ""
         NSCalendarsFullAccessUsageDescription: "Secretary needs calendar access to manage your events."
-        UIBackgroundModes:
-          - processing
         BGTaskSchedulerPermittedIdentifiers:
-          - com.secretary.ios.agent
+          - $(PRODUCT_BUNDLE_IDENTIFIER).background

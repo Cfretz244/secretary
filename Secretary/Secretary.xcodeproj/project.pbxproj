@@ -94,7 +94,7 @@
 		BC84724521EBF90469C1DB4E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		C48ABF271FF29B540A7B0438 /* SyncLogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLogRepository.swift; sourceTree = "<group>"; };
 		CB79A6FA277C0E0087FC94F4 /* IMAPConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMAPConnection.swift; sourceTree = "<group>"; };
-		CCCA4C4A475422D4319CD3AC /* Secretary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Secretary.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CCCA4C4A475422D4319CD3AC /* Secretary.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Secretary.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF24D1B8AB41883A1BD45F66 /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		D11BF90375095DAAA21EEEDA /* RuleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleRepository.swift; sourceTree = "<group>"; };
 		DD32A8C7C7A7503ABC042D8A /* ToolDefinitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDefinitions.swift; sourceTree = "<group>"; };
@@ -341,6 +341,7 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					E4DC0A5D7EE831122422B5BA = {
+						DevelopmentTeam = 44KC9KSGZQ;
 						ProvisioningStyle = Automatic;
 					};
 				};

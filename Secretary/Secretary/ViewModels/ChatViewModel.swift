@@ -14,7 +14,7 @@ final class ChatViewModel: ObservableObject {
     private var runningTask: Task<Void, Never>?
     private let sessionId: String
     private let db: DatabaseQueue
-    private var legacyBackgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
 
     init() {
         self.sessionId = "ios-\(UIDevice.current.identifierForVendor?.uuidString.prefix(8) ?? "default")"
@@ -52,7 +52,7 @@ final class ChatViewModel: ObservableObject {
             guard let agentLoop else {
                 messages[assistantIndex].text = "Not configured. Please set up credentials in Settings."
                 isStreaming = false
-                endBackgroundProcessing(success: true)
+                endBackgroundProcessing()
                 return
             }
 
@@ -72,11 +72,13 @@ final class ChatViewModel: ObservableObject {
                     )
                     toolsTotal += 1
                     BackgroundTaskCoordinator.shared.updateProgress(completed: toolsCompleted, total: toolsTotal)
+                    BackgroundTaskCoordinator.shared.updateSubtitle("Running \(name)...")
 
                 case .toolProgress(let id, let detail):
                     if let idx = messages[assistantIndex].toolCalls.firstIndex(where: { $0.id == id }) {
                         messages[assistantIndex].toolCalls[idx].detail = detail
                     }
+                    BackgroundTaskCoordinator.shared.updateSubtitle(detail)
 
                 case .toolDone(_, let id):
                     if let idx = messages[assistantIndex].toolCalls.firstIndex(where: { $0.id == id }) {
@@ -99,7 +101,7 @@ final class ChatViewModel: ObservableObject {
             }
 
             isStreaming = false
-            endBackgroundProcessing(success: !Task.isCancelled)
+            endBackgroundProcessing()
         }
     }
 
@@ -110,8 +112,7 @@ final class ChatViewModel: ObservableObject {
             await agentLoop?.cancel()
         }
         isStreaming = false
-        endBackgroundProcessing(success: false)
-        // Mark any running tool calls as cancelled
+        endBackgroundProcessing()
         if let lastIdx = messages.indices.last, messages[lastIdx].role == .assistant {
             for i in messages[lastIdx].toolCalls.indices {
                 if messages[lastIdx].toolCalls[i].status == .running {
@@ -134,10 +135,8 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Called when the app's scene phase changes.
     func handleScenePhase(_ phase: ScenePhase) {
         if phase == .active && !isStreaming {
-            // Mark any tool calls left as running (from a background expiration) as failed
             if let lastIdx = messages.indices.last, messages[lastIdx].role == .assistant {
                 var anyFixed = false
                 for i in messages[lastIdx].toolCalls.indices {
@@ -156,37 +155,40 @@ final class ChatViewModel: ObservableObject {
     // MARK: - Background processing
 
     private func beginBackgroundProcessing() {
-        // Try BGContinuedProcessingTask first (works on real devices, iOS 26+)
+        // Try BGContinuedProcessingTask (device only, extended background time)
         let request = BGContinuedProcessingTaskRequest(
-            identifier: SecretaryApp.backgroundTaskIdentifier,
+            identifier: SecretaryApp.backgroundTaskId,
             title: "Secretary",
             subtitle: "Processing your request..."
         )
+        request.strategy = .queue
+
         BackgroundTaskCoordinator.shared.onExpiration = { [weak self] in
-            Task { @MainActor in
-                self?.stopStreaming()
-            }
-        }
-        do {
-            try BGTaskScheduler.shared.submit(request)
-            NSLog("[Secretary] BGContinuedProcessingTask submitted successfully")
-            return
-        } catch {
-            // Falls through to legacy fallback (e.g., Simulator doesn't support BGTasks)
-            NSLog("[Secretary] BGContinuedProcessingTask unavailable, using legacy background task: %@", "\(error)")
+            self?.stopStreaming()
         }
 
-        // Fallback: beginBackgroundTask (~30s on real devices, works on Simulator)
-        legacyBackgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "AgentLoop") { [weak self] in
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            return
+        } catch {
+            // Fallback for Simulator or if BGTask unavailable
+        }
+
+        // Fallback: beginBackgroundTask (~30s)
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "AgentLoop") { [weak self] in
             self?.stopStreaming()
         }
     }
 
-    private func endBackgroundProcessing(success: Bool) {
-        BackgroundTaskCoordinator.shared.complete(success: success)
-        if legacyBackgroundTaskId != .invalid {
-            UIApplication.shared.endBackgroundTask(legacyBackgroundTaskId)
-            legacyBackgroundTaskId = .invalid
+    private func endBackgroundProcessing() {
+        // Signal the BGTask handler to stop blocking
+        BackgroundTaskCoordinator.shared.markFinished()
+        BackgroundTaskCoordinator.shared.onExpiration = nil
+
+        // End legacy background task if active
+        if backgroundTaskId != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+            backgroundTaskId = .invalid
         }
     }
 }
