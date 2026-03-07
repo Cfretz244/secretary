@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import os
 
-/// Delta sync engine: IMAP -> SQLite. Port of sync.py.
+/// Delta sync engine: IMAP -> SQLite.
 enum SyncEngine {
     private static let logger = Logger(subsystem: "Secretary", category: "SyncEngine")
 
@@ -10,15 +10,28 @@ enum SyncEngine {
         db: DatabaseQueue,
         folderName: String,
         since: String? = nil,
-        progress: ((Int, Int) -> Void)? = nil,
+        progress: ((String, Int, Int) -> Void)? = nil,
+        cancelled: (() -> Bool)? = nil
+    ) async throws -> SyncResult {
+        let imap = IMAPClient()
+        try await imap.connect(email: KeychainManager.icloudEmail, password: KeychainManager.icloudPassword)
+        defer { Task { await imap.disconnect() } }
+        return try await syncFolderWith(imap: imap, db: db, folderName: folderName, since: since,
+                                         progress: progress, cancelled: cancelled)
+    }
+
+    static func syncFolderWith(
+        imap: IMAPClient,
+        db: DatabaseQueue,
+        folderName: String,
+        since: String? = nil,
+        progress: ((String, Int, Int) -> Void)? = nil,
         cancelled: (() -> Bool)? = nil
     ) async throws -> SyncResult {
         var result = SyncResult(folder: folderName)
         let isCancelled = { cancelled?() ?? false }
 
-        let imap = IMAPClient()
-        try await imap.connect(email: KeychainManager.icloudEmail, password: KeychainManager.icloudPassword)
-        defer { Task { await imap.disconnect() } }
+        progress?(folderName, 0, 0)
 
         // Phase 0: Select folder and UIDVALIDITY check
         let sel = try await imap.selectFolder(folderName, readonly: true)
@@ -46,38 +59,11 @@ enum SyncEngine {
         let serverUids = Set(try await imap.searchUids())
         let localUids = try await db.read { db in try MessageRepository.localUidsForFolder(db, folder: folderName) }
 
-        // Phase 1: Removal detection
-        var staleUids = localUids.subtracting(serverUids)
-        if !staleUids.isEmpty && !isCancelled() {
-            let protectedMsgIds = try await db.read { db in try MessageRepository.messageIdsWithStagedChanges(db) }
-            if !protectedMsgIds.isEmpty {
-                let staleSnapshot = staleUids
-                let protectedUids: Set<Int> = try await db.read { db in
-                    var protected = Set<Int>()
-                    for uid in staleSnapshot {
-                        if let msg = try MessageRepository.getByFolderUid(db, folder: folderName, uid: uid),
-                           let id = msg.id, protectedMsgIds.contains(id) {
-                            protected.insert(uid)
-                        }
-                    }
-                    return protected
-                }
-                let removable = staleUids.subtracting(protectedUids)
-                result.skippedRemovals = protectedUids.count
-                staleUids = removable
-            }
+        // Phase 1: Removal detection — don't delete yet, just track stale UIDs.
+        // After fetch, we do local dedup to detect moves.
+        let staleUids = localUids.subtracting(serverUids)
 
-            if !staleUids.isEmpty {
-                let toDelete = staleUids
-                let deleted = try await db.write { db in
-                    try MessageRepository.deleteByFolderUids(db, folder: folderName, uids: toDelete)
-                }
-                result.deletedMessages += deleted
-                logger.info("\(folderName): removed \(deleted) stale messages")
-            }
-        }
-
-        // Phase 2: New UID discovery with move deduplication
+        // Phase 2: Discover new UIDs
         var newUids = serverUids.subtracting(localUids)
 
         if let since, !newUids.isEmpty {
@@ -86,7 +72,7 @@ enum SyncEngine {
             newUids = newUids.intersection(sinceUids)
         }
 
-        if newUids.isEmpty && result.deletedMessages == 0 {
+        if newUids.isEmpty && staleUids.isEmpty {
             let maxUid = serverUids.max() ?? 0
             try await db.write { db in
                 try updateFolderState(db, name: folderName, sel: sel, lastUid: maxUid)
@@ -95,58 +81,21 @@ enum SyncEngine {
             return result
         }
 
-        // Move deduplication
-        var fetchUids: [Int] = []
-        if !newUids.isEmpty && !isCancelled() {
-            let batchSize = AppConfig.batchSize
-            let newUidList = newUids.sorted()
-            for i in stride(from: 0, to: newUidList.count, by: batchSize) {
-                if isCancelled() { break }
-                let batch = Array(newUidList[i..<min(i + batchSize, newUidList.count)])
-                do {
-                    let midData = try await imap.fetchMessageIdsAndFlags(uids: batch)
-                    for uid in batch {
-                        guard let info = midData[uid], !info.messageId.isEmpty else {
-                            fetchUids.append(uid)
-                            continue
-                        }
-                        let existing = try await db.read { db in
-                            try MessageRepository.findByMessageId(db, messageIdHeader: info.messageId)
-                        }
-                        if let existing, let existingId = existing.id, existing.folder != folderName {
-                            let flags = info.flags
-                            try await db.write { db in
-                                try MessageRepository.updateLocation(db, localId: existingId,
-                                                                     newFolder: folderName, newUid: uid, newFlags: flags)
-                                try StagedChangeRepository.updateLocation(db, messageId: existingId,
-                                                                          newFolder: folderName, newUid: uid)
-                            }
-                            result.movedMessages += 1
-                        } else {
-                            fetchUids.append(uid)
-                        }
-                    }
-                } catch {
-                    result.errors.append("Message-ID fetch batch: \(error)")
-                    fetchUids.append(contentsOf: batch)
-                }
-            }
-        }
-
-        // Phase 3: Full fetch for genuinely new messages
+        // Phase 3: Fetch new messages (full headers + bodies)
         var totalFetched = 0
+        let fetchUids = newUids.sorted().reversed() as [Int]
         if !fetchUids.isEmpty && !isCancelled() {
-            fetchUids = fetchUids.sorted().reversed()
             let batchSize = AppConfig.batchSize
             let totalUids = fetchUids.count
 
             for i in stride(from: 0, to: totalUids, by: batchSize) {
+                try Task.checkCancellation()
                 if isCancelled() {
                     logger.info("\(folderName): sync cancelled after \(totalFetched) messages")
                     break
                 }
                 let batch = Array(fetchUids[i..<min(i + batchSize, totalUids)])
-                progress?(totalFetched, totalUids)
+                progress?(folderName, totalFetched, totalUids)
 
                 do {
                     let fetched = try await imap.fetchMessages(uids: batch)
@@ -165,15 +114,48 @@ enum SyncEngine {
             }
 
             result.newMessages = totalFetched
-            progress?(totalFetched, fetchUids.count)
+            progress?(folderName, totalFetched, fetchUids.count)
         }
 
-        // Phase 4: Purge \Deleted
+        // Phase 4: Local move dedup + stale removal
+        // Check if any stale messages (gone from this folder) reappeared in another
+        // folder (same Message-ID). If so, it was a move — just delete the old copy.
+        if !staleUids.isEmpty && !isCancelled() {
+            let protectedMsgIds = try await db.read { db in try MessageRepository.messageIdsWithStagedChanges(db) }
+            let staleSnapshot = staleUids
+            let currentFolder = folderName
+            let (deleted, moved) = try await db.write { db -> (Int, Int) in
+                var deleteIds: [Int64] = []
+                var movedCount = 0
+                for uid in staleSnapshot {
+                    guard let msg = try MessageRepository.getByFolderUid(db, folder: currentFolder, uid: uid),
+                          let msgId = msg.id else { continue }
+                    // Skip protected messages (have staged changes)
+                    if protectedMsgIds.contains(msgId) { continue }
+                    // Check if this message exists in another folder (was moved)
+                    if !msg.messageId.isEmpty,
+                       let dupe = try MessageRepository.findByMessageId(db, messageIdHeader: msg.messageId),
+                       let dupeId = dupe.id, dupeId != msgId {
+                        movedCount += 1
+                    }
+                    deleteIds.append(msgId)
+                }
+                let count = try MessageRepository.deleteBulk(db, messageIds: deleteIds)
+                return (count, movedCount)
+            }
+            result.deletedMessages += deleted
+            result.movedMessages += moved
+            if deleted > 0 {
+                logger.info("\(folderName): removed \(deleted) stale messages (\(moved) moved)")
+            }
+        }
+
+        // Phase 5: Purge \Deleted
         if !isCancelled() {
             try await db.write { db in try purgeDeletedFromCache(db, folder: folderName) }
         }
 
-        // Phase 5: Update folder state
+        // Phase 6: Update folder state
         let syncCompleted = !isCancelled()
         let finalUid = serverUids.max() ?? 0
         let logNewMessages = result.newMessages
@@ -203,7 +185,7 @@ enum SyncEngine {
     static func syncAllFolders(
         db: DatabaseQueue,
         since: String? = nil,
-        progress: ((Int, Int) -> Void)? = nil,
+        progress: ((String, Int, Int) -> Void)? = nil,
         cancelled: (() -> Bool)? = nil
     ) async throws -> [SyncResult] {
         var results: [SyncResult] = []
@@ -216,10 +198,10 @@ enum SyncEngine {
         let selectable = folders.filter { !$0.flags.contains("\\Noselect") }
 
         for folderInfo in selectable {
-            if cancelled?() == true { break }
+            if Task.isCancelled || cancelled?() == true { break }
             do {
-                let r = try await syncFolder(db: db, folderName: folderInfo.name, since: since,
-                                              progress: progress, cancelled: cancelled)
+                let r = try await syncFolder(db: db, folderName: folderInfo.name,
+                                              since: since, progress: progress, cancelled: cancelled)
                 results.append(r)
             } catch {
                 results.append(SyncResult(folder: folderInfo.name, errors: [error.localizedDescription]))

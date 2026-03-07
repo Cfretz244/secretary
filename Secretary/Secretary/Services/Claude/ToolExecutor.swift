@@ -8,14 +8,19 @@ final class ToolExecutor: @unchecked Sendable {
     private let calendarService: CalendarService
     private let logger = Logger(subsystem: "Secretary", category: "ToolExecutor")
 
+    /// Called with progress detail strings during long-running tools (sync).
+    var onProgress: ((String) -> Void)?
+
     init(db: DatabaseQueue, calendarService: CalendarService) {
         self.db = db
         self.calendarService = calendarService
     }
 
-    func execute(name: String, arguments: [String: Any]) async -> String {
+    func execute(name: String, arguments: [String: Any]) async throws -> String {
         do {
             return try await dispatch(name: name, args: arguments)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             logger.error("Tool \(name) failed: \(error)")
             return "Error: \(error.localizedDescription)"
@@ -27,12 +32,28 @@ final class ToolExecutor: @unchecked Sendable {
         case "sync_folder":
             let folder = args["folder"] as? String ?? "INBOX"
             let since = args["since"] as? String
-            let result = try await SyncEngine.syncFolder(db: db, folderName: folder, since: since)
+            let progress = onProgress
+            let result = try await SyncEngine.syncFolder(db: db, folderName: folder, since: since,
+                                                          progress: { folder, done, total in
+                if total > 0 {
+                    progress?("\(folder): \(done)/\(total) messages")
+                } else {
+                    progress?("\(folder): connecting...")
+                }
+            })
             return result.summary
 
         case "sync_all":
             let since = args["since"] as? String
-            let results = try await SyncEngine.syncAllFolders(db: db, since: since)
+            let progress = onProgress
+            let results = try await SyncEngine.syncAllFolders(db: db, since: since,
+                                                               progress: { folder, done, total in
+                if total > 0 {
+                    progress?("\(folder): \(done)/\(total) messages")
+                } else {
+                    progress?("\(folder)...")
+                }
+            })
             let lines = results.map(\.summary)
             return "Synced \(results.count) folders:\n" + lines.joined(separator: "\n")
 

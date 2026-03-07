@@ -16,6 +16,7 @@ struct ChatMessage: Identifiable, Equatable {
         let id: String
         let name: String
         var status: Status
+        var detail: String?
 
         enum Status: Equatable {
             case running

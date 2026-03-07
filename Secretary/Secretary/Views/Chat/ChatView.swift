@@ -44,12 +44,16 @@ struct ChatView: View {
                         }
 
                     Button {
-                        viewModel.sendMessage()
+                        if viewModel.isStreaming {
+                            viewModel.stopStreaming()
+                        } else {
+                            viewModel.sendMessage()
+                        }
                     } label: {
                         Image(systemName: viewModel.isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty && !viewModel.isStreaming
-                                             ? .gray : .blue)
+                            .foregroundStyle(viewModel.isStreaming ? .red :
+                                viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .gray : .blue)
                     }
                     .disabled(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty && !viewModel.isStreaming)
                 }

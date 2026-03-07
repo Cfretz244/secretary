@@ -63,6 +63,24 @@ enum MessageRepository {
                                     arguments: [messageIdHeader])
     }
 
+    static func findByMessageIds(_ db: Database, messageIdHeaders: [String]) throws -> [String: Message] {
+        guard !messageIdHeaders.isEmpty else { return [:] }
+        var result: [String: Message] = [:]
+        let batchSize = 900
+        for i in stride(from: 0, to: messageIdHeaders.count, by: batchSize) {
+            let batch = Array(messageIdHeaders[i..<min(i + batchSize, messageIdHeaders.count)])
+            let placeholders = batch.map { _ in "?" }.joined(separator: ",")
+            let messages = try Message.fetchAll(db,
+                sql: "SELECT * FROM messages WHERE message_id IN (\(placeholders))",
+                arguments: StatementArguments(batch)
+            )
+            for msg in messages {
+                result[msg.messageId] = msg
+            }
+        }
+        return result
+    }
+
     static func updateLocation(_ db: Database, localId: Int64, newFolder: String, newUid: Int, newFlags: String) throws {
         try db.execute(
             sql: "UPDATE messages SET folder = ?, uid = ?, flags = ? WHERE id = ?",

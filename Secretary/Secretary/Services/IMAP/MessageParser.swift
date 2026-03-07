@@ -87,28 +87,38 @@ enum MessageParser {
     static func htmlToText(_ html: String) -> String {
         do {
             let doc = try SwiftSoup.parse(html)
-            // Remove non-visible elements
             try doc.select("style, script, head").remove()
-            // Remove hidden elements
-            try doc.select("[style~=display\\s*:\\s*none]").remove()
-            try doc.select("[style~=max-height\\s*:\\s*0]").remove()
-            try doc.select("[style~=font-size\\s*:\\s*0]").remove()
 
             var text = try doc.text(trimAndNormaliseWhitespace: false)
-            // Strip zero-width characters
-            text = text.replacingOccurrences(of: "\u{200B}", with: "")
-                .replacingOccurrences(of: "\u{200C}", with: "")
-                .replacingOccurrences(of: "\u{200D}", with: "")
-                .replacingOccurrences(of: "\u{FEFF}", with: "")
 
-            // Collapse whitespace
-            let lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
-            text = lines.joined(separator: "\n")
-            // Collapse 3+ newlines to 2
-            while text.contains("\n\n\n") {
-                text = text.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+            // Single-pass: strip zero-width chars, trim lines, collapse newlines
+            var result: [Character] = []
+            result.reserveCapacity(text.count)
+            let zwc: Set<Character> = ["\u{200B}", "\u{200C}", "\u{200D}", "\u{FEFF}"]
+            var consecutiveNewlines = 0
+
+            for char in text {
+                if zwc.contains(char) { continue }
+                if char.isNewline {
+                    consecutiveNewlines += 1
+                    // Trim trailing whitespace from previous line
+                    while let last = result.last, last == " " || last == "\t" {
+                        result.removeLast()
+                    }
+                    if consecutiveNewlines <= 2 {
+                        result.append("\n")
+                    }
+                } else {
+                    // Skip leading whitespace on new lines
+                    if consecutiveNewlines > 0 && (char == " " || char == "\t") {
+                        continue
+                    }
+                    consecutiveNewlines = 0
+                    result.append(char)
+                }
             }
-            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            return String(result).trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             return html
         }

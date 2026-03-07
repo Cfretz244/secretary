@@ -117,11 +117,14 @@ actor IMAPConnection {
     }
 
     func readLine() async throws -> String {
+        let crlf = Data("\r\n".utf8)
         while true {
-            if let range = buffer.range(of: Data("\r\n".utf8)) {
+            try Task.checkCancellation()
+            if let range = buffer.range(of: crlf) {
                 let lineData = buffer[buffer.startIndex..<range.lowerBound]
-                buffer.removeSubrange(buffer.startIndex...range.upperBound - 1)
-                return String(data: lineData, encoding: .utf8) ?? String(data: lineData, encoding: .ascii) ?? ""
+                buffer = Data(buffer[range.upperBound...])
+                return String(data: Data(lineData), encoding: .utf8)
+                    ?? String(data: Data(lineData), encoding: .ascii) ?? ""
             }
             try await fillBuffer()
         }
@@ -131,9 +134,9 @@ actor IMAPConnection {
         while buffer.count < count {
             try await fillBuffer()
         }
-        let data = buffer.prefix(count)
-        buffer.removeFirst(count)
-        return Data(data)
+        let data = Data(buffer.prefix(count))
+        buffer = Data(buffer.dropFirst(count))
+        return data
     }
 
     private func fillBuffer() async throws {

@@ -4,16 +4,24 @@ struct ToolCallView: View {
     let toolCall: ChatMessage.ToolCallStatus
 
     var body: some View {
-        HStack(spacing: 6) {
-            statusIcon
-            Text(toolCall.name)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                statusIcon
+                Text(toolCall.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let detail = toolCall.detail {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .background(Color(.systemGray5))
-        .clipShape(Capsule())
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder

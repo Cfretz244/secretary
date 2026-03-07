@@ -1,12 +1,26 @@
 import Foundation
 import GRDB
+import os
 
 final class DatabaseManager: Sendable {
+    static let databaseResetNotification = Notification.Name("DatabaseManager.databaseReset")
+    private static let logger = Logger(subsystem: "Secretary", category: "DatabaseManager")
     let dbQueue: DatabaseQueue
 
     static let shared: DatabaseManager = {
         let path = databasePath()
-        return try! DatabaseManager(path: path)
+        do {
+            return try DatabaseManager(path: path)
+        } catch {
+            logger.error("Database corrupted, resetting: \(error)")
+            try? FileManager.default.removeItem(atPath: path)
+            try? FileManager.default.removeItem(atPath: path + "-wal")
+            try? FileManager.default.removeItem(atPath: path + "-shm")
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: DatabaseManager.databaseResetNotification, object: nil)
+            }
+            return try! DatabaseManager(path: path)
+        }
     }()
 
     init(path: String) throws {

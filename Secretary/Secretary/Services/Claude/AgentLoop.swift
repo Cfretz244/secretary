@@ -7,6 +7,7 @@ import os
 enum StreamEvent: Sendable {
     case textDelta(String)
     case toolStart(name: String, id: String)
+    case toolProgress(id: String, detail: String)
     case toolDone(name: String, id: String)
     case error(String)
     case done
@@ -19,15 +20,26 @@ actor AgentLoop {
     private let db: DatabaseQueue
     private let logger = Logger(subsystem: "Secretary", category: "AgentLoop")
 
+    private var cancelled = false
+    private var innerTask: Task<Void, Never>?
+
     init(claudeService: ClaudeService, toolExecutor: ToolExecutor, db: DatabaseQueue) {
         self.claudeService = claudeService
         self.toolExecutor = toolExecutor
         self.db = db
     }
 
+    func cancel() {
+        cancelled = true
+        innerTask?.cancel()
+        innerTask = nil
+    }
+
     func run(sessionId: String, userMessage: String) -> AsyncStream<StreamEvent> {
-        AsyncStream { continuation in
-            Task {
+        cancelled = false
+        innerTask?.cancel()
+        return AsyncStream { continuation in
+            innerTask = Task {
                 await self.executeLoop(sessionId: sessionId, userMessage: userMessage, continuation: continuation)
             }
         }
@@ -67,6 +79,13 @@ actor AgentLoop {
         let systemPrompt = SystemPrompt.get()
 
         for _ in 0..<AppConfig.maxToolIterations {
+            if cancelled || Task.isCancelled {
+                logger.info("Agent loop cancelled")
+                continuation.yield(.done)
+                continuation.finish()
+                return
+            }
+
             let elapsed = Date().timeIntervalSince(startTime)
             if elapsed > AppConfig.loopTimeoutSeconds {
                 logger.warning("Agent loop timed out after \(elapsed)s")
@@ -133,9 +152,19 @@ actor AgentLoop {
                 // Execute tools and collect results
                 var toolResultObjects: [MessageParameter.Message.Content.ContentObject] = []
                 for tu in toolUses {
+                    if cancelled || Task.isCancelled {
+                        continuation.yield(.done)
+                        continuation.finish()
+                        return
+                    }
                     logger.info("Executing tool: \(tu.name)")
-                    var result = await toolExecutor.execute(name: tu.name,
-                                                           arguments: Self.dynamicContentToDict(tu.input))
+                    let toolId = tu.id
+                    toolExecutor.onProgress = { detail in
+                        continuation.yield(.toolProgress(id: toolId, detail: detail))
+                    }
+                    var result = try await toolExecutor.execute(name: tu.name,
+                                                               arguments: Self.dynamicContentToDict(tu.input))
+                    toolExecutor.onProgress = nil
 
                     if result.count > AppConfig.toolResultMaxChars {
                         result = String(result.prefix(AppConfig.toolResultMaxChars)) + "\n\n[Result truncated]"

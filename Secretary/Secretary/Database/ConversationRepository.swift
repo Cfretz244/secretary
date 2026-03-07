@@ -164,7 +164,80 @@ enum ConversationRepository {
             }
         }
 
+        // Validate: every tool_use must be followed by a tool_result.
+        // After cancellation, tool_use blocks may be orphaned. Insert synthetic
+        // tool_results wherever they're missing.
+        messages = repairToolUseHistory(messages)
+
         return messages
+    }
+
+    /// Scan through messages and insert synthetic tool_results for any
+    /// tool_use blocks that lack a corresponding tool_result.
+    private static func repairToolUseHistory(_ messages: [[String: Any]]) -> [[String: Any]] {
+        // Collect all tool_result IDs in the history
+        var answeredIds = Set<String>()
+        for msg in messages {
+            if let contentList = msg["content"] as? [[String: Any]] {
+                for block in contentList where block["type"] as? String == "tool_result" {
+                    if let id = block["tool_use_id"] as? String { answeredIds.insert(id) }
+                }
+            }
+        }
+
+        var result: [[String: Any]] = []
+        for msg in messages {
+            // Check if this assistant message has tool_use blocks missing results
+            if msg["role"] as? String == "assistant" {
+                var missingIds: [String] = []
+                if let contentList = msg["content"] as? [[String: Any]] {
+                    for block in contentList where block["type"] as? String == "tool_use" {
+                        if let id = block["id"] as? String, !answeredIds.contains(id) {
+                            missingIds.append(id)
+                        }
+                    }
+                }
+                result.append(msg)
+                if !missingIds.isEmpty {
+                    // Insert a synthetic user message with tool_results right after
+                    let syntheticResults: [[String: Any]] = missingIds.map { id in
+                        ["type": "tool_result", "tool_use_id": id, "content": "Cancelled by user."]
+                    }
+                    result.append(["role": "user", "content": syntheticResults])
+                }
+            } else {
+                result.append(msg)
+            }
+        }
+
+        // Merge consecutive user messages (synthetic results + real user text)
+        var merged: [[String: Any]] = []
+        for msg in result {
+            if msg["role"] as? String == "user",
+               let prev = merged.last, prev["role"] as? String == "user" {
+                // Merge into previous user message
+                var updated = prev
+                var prevContent: [[String: Any]]
+                if let list = updated["content"] as? [[String: Any]] {
+                    prevContent = list
+                } else if let text = updated["content"] as? String {
+                    prevContent = [["type": "text", "text": text]]
+                } else {
+                    prevContent = []
+                }
+                if let list = msg["content"] as? [[String: Any]] {
+                    prevContent.append(contentsOf: list)
+                } else if let text = msg["content"] as? String {
+                    prevContent.append(["type": "text", "text": text])
+                }
+                updated["content"] = prevContent
+                merged[merged.count - 1] = updated
+            } else {
+                merged.append(msg)
+            }
+        }
+
+        return merged
     }
 
     private static func ensureContentList(_ message: inout [String: Any]) -> [[String: Any]] {

@@ -60,6 +60,27 @@ Secretary/Secretary/
 5. Loop continues until Claude responds with no tool calls or hits iteration limit
 6. `StreamEvent`s flow back to ChatViewModel via AsyncStream
 
+### Cancellation Architecture
+- `ChatViewModel.stopStreaming()` cancels `runningTask` AND calls `agentLoop.cancel()`
+- `AgentLoop` stores its inner `Task` separately — AsyncStream inner tasks are NOT children of the consuming task
+- `AgentLoop.cancel()` sets a `cancelled` flag and cancels the inner task
+- `Task.checkCancellation()` is called in `IMAPConnection.readLine()` and in the sync batch loop
+- `ToolExecutor.execute()` rethrows `CancellationError` so the agent loop can exit cleanly
+- After cancellation, orphaned `tool_use` blocks (no matching `tool_result`) break the Claude API
+- `ConversationRepository.repairToolUseHistory()` inserts synthetic `tool_result` blocks for orphaned tool_use
+
+### SyncEngine Phases (6-phase delta sync)
+0. Select folder + UIDVALIDITY check (purge local data on change)
+1. Track stale UIDs (server-missing, don't delete yet)
+2. Discover new UIDs (optionally filtered by SINCE date)
+3. Fetch new messages (full headers + bodies, batched, with progress callbacks)
+4. Local move dedup — check stale messages against local DB by Message-ID (no remote scan)
+5. Purge `\Deleted` flagged messages (skip protected/staged)
+6. Update folder state (uidvalidity, lastSyncedUid, uidnext)
+
+### DatabaseManager Recovery
+On startup, if the database is corrupted, `DatabaseManager.shared` catches the error, deletes the corrupt DB files, recreates a fresh database, and posts `databaseResetNotification`. `ChatViewModel` listens for this and shows a warning to the user.
+
 ## SwiftAnthropic API (v2.2.x)
 - Model enum: `.other("model-id")` (not `.custom()`)
 - Messages: `MessageParameter.Message(role: .user/.assistant, content: .text(String) | .list([ContentObject]))`
@@ -101,6 +122,47 @@ Break `StatementArguments([large dict literal])` into a separate `let args: [Str
 ### `@preconcurrency import` for third-party Sendable gaps
 ```swift
 @preconcurrency import SwiftAnthropic
+```
+
+## Runtime Pitfalls — Lessons from Debugging
+
+### Swift `Data` slicing is index-unsafe
+After `buffer.removeFirst(n)`, the resulting `Data` is a *slice* with a non-zero `startIndex`. Subscripting from index 0 crashes. **Always normalize slices** with `Data(buffer[range...])` or use Foundation's built-in `Data.range(of:)` which handles indices correctly. Never write custom `Data.range(of:)` extensions — they shadow Foundation's correct implementation.
+
+### Avoid O(n²) string replacement patterns
+`while text.contains(x) { text = text.replacingOccurrences(...) }` is O(n²) on large strings. Use single-pass character scanning instead. This caused 100% CPU hangs on large HTML emails in `MessageParser.htmlToText()`.
+
+### Batch DB operations in sync paths
+Individual `db.read` calls per message (e.g., `findByMessageId` in a loop) create thousands of async DB roundtrips and appear to hang. Use batch `IN (...)` queries in a single transaction instead. See `MessageRepository.findByMessageIds()`.
+
+### IMAP move dedup should be local-only
+The original design fetched Message-ID headers via IMAP to detect moves. This is an unnecessary extra IMAP pass. Instead: fetch all new messages directly, then check stale (server-missing) messages against the *local* DB by Message-ID to detect moves.
+
+### AsyncStream inner tasks need explicit cancellation
+Tasks launched inside an `AsyncStream` builder are NOT children of the task consuming the stream. Store the inner `Task` and cancel it explicitly in the actor's `cancel()` method.
+
+### Claude API requires tool_result for every tool_use
+After cancelling mid-tool-execution, orphaned `tool_use` blocks in the conversation DB cause API errors on the next request. `ConversationRepository.repairToolUseHistory()` scans all messages and inserts synthetic `tool_result` blocks for any unmatched `tool_use`.
+
+## Diagnostics
+
+Useful commands for debugging on simulator:
+```bash
+# Screenshot
+xcrun simctl io booted screenshot /tmp/sim.png
+
+# CPU profiling (find PID with `xcrun simctl spawn booted launchctl list`)
+sample <pid> 3
+
+# Crash reports
+ls ~/Library/Logs/DiagnosticReports/Secretary-*.ips
+
+# Examine SQLite DB
+xcrun simctl get_app_container booted com.secretary.app data
+sqlite3 <container>/Library/Application\ Support/Secretary/secretary.db
+
+# System log
+log show --predicate 'subsystem == "Secretary"' --last 5m
 ```
 
 ## Future: macOS Messages Companion
