@@ -187,6 +187,68 @@ final class ToolExecutor: @unchecked Sendable {
             }
             return lines.joined(separator: "\n")
 
+        // Email compose tools
+        case "compose_email":
+            let to = args["to"] as? String ?? ""
+            let subject = args["subject"] as? String ?? ""
+            let body = args["body"] as? String ?? ""
+            let cc = args["cc"] as? String ?? ""
+            let bcc = args["bcc"] as? String ?? ""
+            let replyTo: Int64? = (args["reply_to_message_id"] as? Int).map(Int64.init)
+                ?? (args["reply_to_message_id"] as? Double).map { Int64($0) }
+            let draft = try FlushEngine.composeDraft(db: db, to: to, cc: cc, bcc: bcc,
+                                                      subject: subject, body: body,
+                                                      replyToMessageId: replyTo)
+            var result = "Draft #\(draft.id ?? 0) created:\n  To: \(to)\n  Subject: \(subject)"
+            if !cc.isEmpty { result += "\n  Cc: \(cc)" }
+            if !bcc.isEmpty { result += "\n  Bcc: \(bcc)" }
+            if let replyTo { result += "\n  In reply to message #\(replyTo)" }
+            result += "\n  Body: \(String(body.prefix(200)))"
+            if body.count > 200 { result += "..." }
+            return result
+
+        case "update_draft":
+            let draftId = Self.int64Arg(args, "draft_id")
+            let to = args["to"] as? String
+            let cc = args["cc"] as? String
+            let bcc = args["bcc"] as? String
+            let subject = args["subject"] as? String
+            let body = args["body"] as? String
+            let updated = try FlushEngine.updateDraft(db: db, draftId: draftId, to: to, cc: cc, bcc: bcc,
+                                                       subject: subject, body: body)
+            return updated ? "Draft #\(draftId) updated." : "No changes to draft #\(draftId)."
+
+        case "remove_draft":
+            let draftId = Self.int64Arg(args, "draft_id")
+            let removed = try FlushEngine.removeDraft(db: db, draftId: draftId)
+            return removed ? "Draft #\(draftId) removed." : "Draft #\(draftId) not found."
+
+        case "show_drafts":
+            let drafts = try await db.read { db in try DraftEmailRepository.getAll(db) }
+            guard !drafts.isEmpty else { return "No draft emails pending." }
+            var lines: [String] = ["\(drafts.count) draft(s) pending:"]
+            for d in drafts {
+                lines.append("  [#\(d.id ?? 0)] To: \(d.toRecipients) | Subject: \(String(d.subject.prefix(50)))")
+                if !d.ccRecipients.isEmpty { lines.append("         Cc: \(d.ccRecipients)") }
+                lines.append("         Body: \(String(d.body.prefix(100)))\(d.body.count > 100 ? "..." : "")")
+            }
+            return lines.joined(separator: "\n")
+
+        case "send_drafts":
+            let dryRun = args["dry_run"] as? Bool ?? false
+            let progress = onProgress
+            let result = try await FlushEngine.sendDrafts(db: db, dryRun: dryRun, progress: { done, total in
+                progress?("Sending: \(done)/\(total) emails")
+            })
+            if result.sent == 0 && result.errors.isEmpty { return "No drafts to send." }
+            let prefix = dryRun ? "[DRY RUN] " : ""
+            var lines = ["\(prefix)\(result.sent) email(s) sent."]
+            if !result.errors.isEmpty {
+                lines.append("\(result.errors.count) error(s):")
+                for e in result.errors { lines.append("  \(e)") }
+            }
+            return lines.joined(separator: "\n")
+
         case "sender_histogram":
             let folder = args["folder"] as? String
             let minCount = args["min_count"] as? Int ?? 1

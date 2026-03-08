@@ -104,6 +104,108 @@ enum FlushEngine {
         try db.write { db in try StagedChangeRepository.delete(db, changeId: changeId) }
     }
 
+    // MARK: - Draft Email operations
+
+    static func composeDraft(db: DatabaseQueue, to: String, cc: String, bcc: String,
+                             subject: String, body: String, replyToMessageId: Int64?) throws -> DraftEmail {
+        try db.write { db in
+            // If replying, verify the source message exists
+            if let replyId = replyToMessageId {
+                guard try MessageRepository.getById(db, id: replyId) != nil else {
+                    throw SecretaryError.notFound("Message \(replyId) not found")
+                }
+            }
+            guard !to.isEmpty else {
+                throw SecretaryError.validation("At least one 'to' recipient is required")
+            }
+            let draftId = try DraftEmailRepository.insert(db, to: to, cc: cc, bcc: bcc,
+                                                           subject: subject, body: body,
+                                                           replyToMessageId: replyToMessageId)
+            return DraftEmail(id: draftId, toRecipients: to, ccRecipients: cc, bccRecipients: bcc,
+                              subject: subject, body: body, replyToMessageId: replyToMessageId)
+        }
+    }
+
+    static func updateDraft(db: DatabaseQueue, draftId: Int64, to: String?, cc: String?, bcc: String?,
+                            subject: String?, body: String?) throws -> Bool {
+        try db.write { db in
+            guard try DraftEmailRepository.getById(db, id: draftId) != nil else {
+                throw SecretaryError.notFound("Draft \(draftId) not found")
+            }
+            return try DraftEmailRepository.update(db, id: draftId, to: to, cc: cc, bcc: bcc,
+                                                    subject: subject, body: body)
+        }
+    }
+
+    static func removeDraft(db: DatabaseQueue, draftId: Int64) throws -> Bool {
+        try db.write { db in try DraftEmailRepository.delete(db, id: draftId) }
+    }
+
+    // MARK: - Send Drafts
+
+    struct SendResult {
+        var sent: Int = 0
+        var errors: [String] = []
+    }
+
+    static func sendDrafts(
+        db: DatabaseQueue,
+        dryRun: Bool = false,
+        progress: ((Int, Int) -> Void)? = nil
+    ) async throws -> SendResult {
+        let drafts = try await db.read { db in try DraftEmailRepository.getAll(db) }
+        guard !drafts.isEmpty else { return SendResult() }
+
+        if dryRun {
+            return SendResult(sent: drafts.count)
+        }
+
+        let senderEmail = KeychainManager.icloudEmail
+        let total = drafts.count
+        var done = 0
+        var result = SendResult()
+
+        let smtp = SMTPClient()
+        try await smtp.connect(email: senderEmail, password: KeychainManager.icloudPassword)
+        defer { Task { await smtp.disconnect() } }
+
+        for draft in drafts {
+            let toList = draft.toRecipients.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+            let ccList = draft.ccRecipients.isEmpty ? [] : draft.ccRecipients.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+            let bccList = draft.bccRecipients.isEmpty ? [] : draft.bccRecipients.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+
+            // Resolve In-Reply-To header from source message
+            var inReplyTo: String? = nil
+            if let replyId = draft.replyToMessageId {
+                inReplyTo = try await db.read { db in
+                    try MessageRepository.getById(db, id: replyId)?.messageId
+                }
+            }
+
+            do {
+                if done > 0 { try await smtp.reset() }
+                _ = try await smtp.send(from: senderEmail, to: toList, cc: ccList, bcc: bccList,
+                                        subject: draft.subject, body: draft.body, inReplyTo: inReplyTo)
+                result.sent += 1
+                // Remove the sent draft
+                try await db.write { db in _ = try DraftEmailRepository.delete(db, id: draft.id!) }
+            } catch {
+                result.errors.append("Draft \(draft.id ?? 0) (\(draft.subject)): \(error.localizedDescription)")
+            }
+            done += 1
+            progress?(done, total)
+        }
+
+        // Log the send operation
+        let sentCount = result.sent
+        try await db.write { db in
+            try SyncLogRepository.log(db, folder: "Sent Messages", action: "send",
+                                      messagesSynced: sentCount, details: ["sent": sentCount])
+        }
+
+        return result
+    }
+
     // MARK: - Flush
 
     static func flushChanges(

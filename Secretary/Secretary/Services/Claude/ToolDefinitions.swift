@@ -3,7 +3,7 @@ import SwiftAnthropic
 
 /// All tool definitions in Claude API format. Port of tools.py TOOL_DEFINITIONS.
 enum ToolDefinitions {
-    nonisolated(unsafe) static let all: [MessageParameter.Tool] = emailTools + calendarTools
+    nonisolated(unsafe) static let all: [MessageParameter.Tool] = emailTools + composeTools + calendarTools
 
     // MARK: - Email Tools (19)
 
@@ -221,6 +221,70 @@ enum ToolDefinitions {
                     "limit": .init(type: .integer, description: "Max changes to stage"),
                 ],
                 required: ["conditions", "action"]
+            )
+        ),
+    ]
+
+    // MARK: - Email Compose Tools (5)
+
+    nonisolated(unsafe) static let composeTools: [MessageParameter.Tool] = [
+        .function(
+            name: "compose_email",
+            description: "Stage a new email draft for sending. The email will NOT be sent until send_drafts is called.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "to": .init(type: .string, description: "Comma-separated recipient email addresses"),
+                    "subject": .init(type: .string, description: "Email subject line"),
+                    "body": .init(type: .string, description: "Email body text (plain text)"),
+                    "cc": .init(type: .string, description: "Comma-separated CC email addresses"),
+                    "bcc": .init(type: .string, description: "Comma-separated BCC email addresses"),
+                    "reply_to_message_id": .init(type: .integer, description: "Local DB ID of message being replied to (sets In-Reply-To header)"),
+                ],
+                required: ["to", "subject", "body"]
+            )
+        ),
+        .function(
+            name: "update_draft",
+            description: "Update a staged email draft.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "draft_id": .init(type: .integer, description: "ID of the draft to update"),
+                    "to": .init(type: .string, description: "New recipient list (replaces existing)"),
+                    "subject": .init(type: .string, description: "New subject"),
+                    "body": .init(type: .string, description: "New body text"),
+                    "cc": .init(type: .string, description: "New CC list"),
+                    "bcc": .init(type: .string, description: "New BCC list"),
+                ],
+                required: ["draft_id"]
+            )
+        ),
+        .function(
+            name: "remove_draft",
+            description: "Remove a staged email draft.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "draft_id": .init(type: .integer, description: "ID of the draft to remove"),
+                ],
+                required: ["draft_id"]
+            )
+        ),
+        .function(
+            name: "show_drafts",
+            description: "Show all staged email drafts pending send.",
+            inputSchema: JSONSchema(type: .object, properties: nil, required: nil)
+        ),
+        .function(
+            name: "send_drafts",
+            description: "Send all staged email drafts via SMTP. IMPORTANT: Only call after the user has explicitly confirmed they want to send.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "dry_run": .init(type: .boolean, description: "If true, show what would be sent without actually sending"),
+                ],
+                required: nil
             )
         ),
     ]

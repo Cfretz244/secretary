@@ -3,6 +3,8 @@ import Foundation
 enum AppConfig {
     static let icloudImapHost = "imap.mail.me.com"
     static let icloudImapPort: UInt16 = 993
+    static let icloudSmtpHost = "smtp.mail.me.com"
+    static let icloudSmtpPort: UInt16 = 465
 
     static let maxBodySize = 102400
     static let batchSize = 50

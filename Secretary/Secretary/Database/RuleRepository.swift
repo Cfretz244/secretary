@@ -63,6 +63,7 @@ enum RuleRepository {
 enum SecretaryError: LocalizedError {
     case validation(String)
     case imapError(String)
+    case smtpError(String)
     case syncError(String)
     case notFound(String)
 
@@ -70,6 +71,7 @@ enum SecretaryError: LocalizedError {
         switch self {
         case .validation(let msg): return msg
         case .imapError(let msg): return msg
+        case .smtpError(let msg): return msg
         case .syncError(let msg): return msg
         case .notFound(let msg): return msg
         }

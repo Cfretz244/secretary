@@ -58,5 +58,21 @@ enum Migrations {
                 )
             }
         }
+
+        migrator.registerMigration("v3-draft-emails") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS draft_emails (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    to_recipients TEXT NOT NULL DEFAULT '',
+                    cc_recipients TEXT NOT NULL DEFAULT '',
+                    bcc_recipients TEXT NOT NULL DEFAULT '',
+                    subject TEXT NOT NULL DEFAULT '',
+                    body TEXT NOT NULL DEFAULT '',
+                    reply_to_message_id INTEGER,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """)
+        }
     }
 }
