@@ -64,8 +64,12 @@ actor CalendarService {
 
     func getEvents(startDate: String, endDate: String, calendarName: String? = nil) async throws -> String {
         try await ensureAccess()
-        guard let start = parseDate(startDate), let end = parseDate(endDate) else {
+        guard let start = parseDate(startDate), var end = parseDate(endDate) else {
             return "Invalid date format. Use ISO format (e.g. '2026-03-07')."
+        }
+        // If end date was date-only (midnight), push to end of that day so the full day is included
+        if endDate.count <= 10, let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: end) {
+            end = nextDay
         }
         var calendars: [EKCalendar]? = nil
         if let calendarName {
@@ -149,7 +153,11 @@ actor CalendarService {
     func searchEvents(query: String, startDate: String? = nil, endDate: String? = nil) async throws -> String {
         try await ensureAccess()
         let start = startDate.flatMap(parseDate) ?? Date().addingTimeInterval(-30 * 86400)
-        let end = endDate.flatMap(parseDate) ?? Date().addingTimeInterval(365 * 86400)
+        var end = endDate.flatMap(parseDate) ?? Date().addingTimeInterval(365 * 86400)
+        // If end date was date-only (midnight), push to end of that day
+        if let endDate, endDate.count <= 10, let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: end) {
+            end = nextDay
+        }
         let predicate = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
         let events = eventStore.events(matching: predicate)
             .filter { e in

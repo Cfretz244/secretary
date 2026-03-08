@@ -24,7 +24,7 @@ struct ThreadChatView: View {
                     .padding()
                 }
                 .onChange(of: thread.messages.count) { _, _ in
-                    if isNearBottom, let last = thread.messages.last {
+                    if let last = thread.messages.last {
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
