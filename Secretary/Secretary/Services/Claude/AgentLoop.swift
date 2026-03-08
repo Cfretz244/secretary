@@ -6,9 +6,9 @@ import os
 /// Stream events emitted during agent loop execution.
 enum StreamEvent: Sendable {
     case textDelta(String)
-    case toolStart(name: String, id: String)
+    case toolStart(name: String, id: String, input: String)
     case toolProgress(id: String, detail: String)
-    case toolDone(name: String, id: String)
+    case toolDone(name: String, id: String, result: String)
     case error(String)
     case done
 }
@@ -111,7 +111,15 @@ actor AgentLoop {
                         assistantTextParts.append(text)
                         continuation.yield(.textDelta(text))
                     case .toolUse(let toolUse):
-                        continuation.yield(.toolStart(name: toolUse.name, id: toolUse.id))
+                        let inputDict = Self.dynamicContentToDict(toolUse.input)
+                        let inputJson: String
+                        if let data = try? JSONSerialization.data(withJSONObject: inputDict, options: [.prettyPrinted, .sortedKeys]),
+                           let str = String(data: data, encoding: .utf8) {
+                            inputJson = str
+                        } else {
+                            inputJson = "{}"
+                        }
+                        continuation.yield(.toolStart(name: toolUse.name, id: toolUse.id, input: inputJson))
                         toolUses.append((id: toolUse.id, name: toolUse.name, input: toolUse.input))
                     default:
                         break
@@ -177,7 +185,7 @@ actor AgentLoop {
                                                                    toolUseId: tuId, result: toolResult)
                     }
 
-                    continuation.yield(.toolDone(name: tu.name, id: tu.id))
+                    continuation.yield(.toolDone(name: tu.name, id: tu.id, result: result))
                     toolResultObjects.append(.toolResult(tu.id, result))
                 }
 

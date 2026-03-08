@@ -151,15 +151,22 @@ final class ThreadManager: ObservableObject {
                 case "tool_use":
                     guard let toolCallId = turn.toolCallId else { continue }
                     var name = "tool"
+                    var inputJson: String? = nil
                     if let data = turn.content.data(using: .utf8),
                        let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                         name = parsed["name"] as? String ?? "tool"
+                        if let input = parsed["input"] {
+                            if let inputData = try? JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys]),
+                               let str = String(data: inputData, encoding: .utf8) {
+                                inputJson = str
+                            }
+                        }
                     }
                     if restored.isEmpty || restored.last?.role != .assistant {
                         restored.append(ChatMessage(role: .assistant, text: ""))
                     }
                     restored[restored.count - 1].toolCalls.append(
-                        ChatMessage.ToolCallStatus(id: toolCallId, name: name, status: .running, detail: nil)
+                        ChatMessage.ToolCallStatus(id: toolCallId, name: name, status: .running, detail: nil, input: inputJson)
                     )
 
                 case "tool_result":
@@ -168,6 +175,7 @@ final class ThreadManager: ObservableObject {
                     for i in restored.indices.reversed() {
                         if let idx = restored[i].toolCalls.firstIndex(where: { $0.id == toolCallId }) {
                             restored[i].toolCalls[idx].status = .completed
+                            restored[i].toolCalls[idx].result = turn.content
                             break
                         }
                     }
@@ -261,10 +269,10 @@ final class ThreadManager: ObservableObject {
                     thread.messages[currentAssistantIndex].text += delta
                     BackgroundTaskCoordinator.shared.updateSubtitle("Responding...")
 
-                case .toolStart(let name, let id):
+                case .toolStart(let name, let id, let input):
                     toolCallsOnCurrent = true
                     thread.messages[currentAssistantIndex].toolCalls.append(
-                        ChatMessage.ToolCallStatus(id: id, name: name, status: .running, detail: nil)
+                        ChatMessage.ToolCallStatus(id: id, name: name, status: .running, detail: nil, input: input)
                     )
                     BackgroundTaskCoordinator.shared.updateSubtitle("Running \(name)...")
 
@@ -274,10 +282,11 @@ final class ThreadManager: ObservableObject {
                     }
                     BackgroundTaskCoordinator.shared.updateSubtitle(detail)
 
-                case .toolDone(_, let id):
+                case .toolDone(_, let id, let result):
                     if let idx = thread.messages[currentAssistantIndex].toolCalls.firstIndex(where: { $0.id == id }) {
                         thread.messages[currentAssistantIndex].toolCalls[idx].status = .completed
                         thread.messages[currentAssistantIndex].toolCalls[idx].detail = nil
+                        thread.messages[currentAssistantIndex].toolCalls[idx].result = result
                     }
 
                 case .error(let errorText):

@@ -48,11 +48,7 @@ struct MessageBubbleView: View {
             }
 
             if !message.toolCalls.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(message.toolCalls) { tool in
-                        ToolCallView(toolCall: tool)
-                    }
-                }
+                WrappingToolCallsView(toolCalls: message.toolCalls)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

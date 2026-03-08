@@ -20,28 +20,45 @@ xcodebuild -project Secretary.xcodeproj -scheme Secretary -destination 'platform
 
 ```
 Secretary/Secretary/
-├── Config/AppConfig.swift          — Constants (IMAP host, batch sizes, agent params)
-├── Models/                         — GRDB FetchableRecord/PersistableRecord structs
+├── Config/AppConfig.swift          — Constants (IMAP/SMTP host, batch sizes, agent params)
+├── Models/
+│   ├── ChatMessage.swift           — UI message model (role, text, tool calls)
+│   ├── ConversationThread.swift    — GRDB record for threads table
+│   ├── ConversationTurn.swift      — GRDB record for conversations table
+│   ├── DraftEmail.swift            — GRDB record for draft_emails table
+│   ├── ThreadState.swift           — @MainActor per-thread runtime state (messages, agentLoop)
+│   └── ...                         — Folder, Message, Rule, StagedChange, SyncResult
 ├── Database/
-│   ├── Schema.swift                — 7 tables: folders, messages, messages_fts, staged_changes,
-│   │                                 sync_log, rules, conversations
+│   ├── Schema.swift                — 9 tables: folders, messages, messages_fts, staged_changes,
+│   │                                 sync_log, rules, draft_emails, threads, conversations
+│   ├── Migrations.swift            — Incremental schema migrations (v2-threads, v3-draft-emails)
 │   ├── DatabaseManager.swift       — GRDB DatabaseQueue (WAL, foreign_keys, busy_timeout)
 │   └── *Repository.swift           — Static CRUD methods per table
 ├── Services/
 │   ├── IMAP/
 │   │   ├── IMAPConnection.swift    — Actor: NWConnection with TLS to imap.mail.me.com:993
 │   │   ├── IMAPClient.swift        — Actor: high-level IMAP commands
-│   │   ├── SyncEngine.swift        — 5-phase delta sync (UIDVALIDITY, removal, dedup, fetch, purge)
+│   │   ├── SyncEngine.swift        — 6-phase delta sync (UIDVALIDITY, stale, discover, fetch, dedup, purge)
 │   │   └── FlushEngine.swift       — Stage-then-flush: flags → moves → deletes → expunge
+│   ├── SMTP/SMTPClient.swift       — Actor: NWConnection SMTPS (port 465) for sending email
 │   ├── Claude/
 │   │   ├── AgentLoop.swift         — Actor: streaming tool-use loop with AsyncStream<StreamEvent>
-│   │   ├── ToolDefinitions.swift   — 26 tools (19 email + 7 calendar) as JSON schemas
+│   │   ├── ToolDefinitions.swift   — 31 tools (19 email + 5 compose + 7 calendar) as JSON schemas
 │   │   ├── ToolExecutor.swift      — Class: dispatches tool name → service method
 │   │   └── SystemPrompt.swift      — Claude system prompt with capabilities
 │   ├── Calendar/CalendarService.swift — Actor: EventKit wrapper
 │   └── Rules/RulesEngine.swift     — Condition matching, apply rules, stage changes
-├── ViewModels/                     — @MainActor ObservableObjects
-├── Views/                          — SwiftUI (Chat, Settings, Onboarding)
+├── ViewModels/
+│   ├── ThreadManager.swift         — @MainActor: manages all threads, each with its own AgentLoop
+│   └── SettingsViewModel.swift     — @MainActor: settings/onboarding state
+├── Views/
+│   ├── Chat/
+│   │   ├── ThreadChatView.swift    — Chat UI for a single thread
+│   │   ├── MessageBubbleView.swift — Individual message rendering
+│   │   ├── MarkdownView.swift      — Markdown text rendering
+│   │   └── ToolCallView.swift      — Expandable tool call/result display
+│   ├── Threads/ThreadListView.swift — Thread list sidebar/navigation
+│   └── Settings/                   — OnboardingView, SettingsView
 ├── Keychain/KeychainManager.swift  — iCloud email/password + Anthropic API key
 └── Extensions/                     — Email parsing, IMAP data helpers
 ```
@@ -50,18 +67,20 @@ Secretary/Secretary/
 - **No MCP**: Tools defined as Claude API JSON schemas, executed locally. Same functionality, no protocol overhead.
 - **Custom IMAP client**: Built on NWConnection (Network.framework) with TLS. Avoids immature Swift IMAP libraries.
 - **Stage-then-flush**: All email mutations are queued locally, reviewed, then pushed to IMAP in one batch.
+- **Stage-then-send for compose**: Emails are drafted to a local `draft_emails` table, can be reviewed/edited, then sent via SMTP.
+- **Multi-thread conversations**: Each thread has its own `AgentLoop` and persisted conversation history. `ThreadManager` manages all threads.
 - **ToolExecutor is a class, not actor**: Avoids `[String: Any]` Sendable boundary issues when passing tool arguments.
 
 ### Data Flow
-1. User sends message → `ChatViewModel` → `AgentLoop.run()`
+1. User sends message → `ThreadManager` → `ThreadState.agentLoop.run()`
 2. AgentLoop saves to conversation DB, loads history, calls Claude API
 3. Claude responds with text and/or tool_use blocks
 4. AgentLoop executes tools via `ToolExecutor.execute()`, returns results
 5. Loop continues until Claude responds with no tool calls or hits iteration limit
-6. `StreamEvent`s flow back to ChatViewModel via AsyncStream
+6. `StreamEvent`s flow back to ThreadManager/ThreadState via AsyncStream
 
 ### Cancellation Architecture
-- `ChatViewModel.stopStreaming()` cancels `runningTask` AND calls `agentLoop.cancel()`
+- `ThreadManager.stopStreaming()` cancels the thread's `runningTask` AND calls `agentLoop.cancel()`
 - `AgentLoop` stores its inner `Task` separately — AsyncStream inner tasks are NOT children of the consuming task
 - `AgentLoop.cancel()` sets a `cancelled` flag and cancels the inner task
 - `Task.checkCancellation()` is called in `IMAPConnection.readLine()` and in the sync batch loop
@@ -79,7 +98,12 @@ Secretary/Secretary/
 6. Update folder state (uidvalidity, lastSyncedUid, uidnext)
 
 ### DatabaseManager Recovery
-On startup, if the database is corrupted, `DatabaseManager.shared` catches the error, deletes the corrupt DB files, recreates a fresh database, and posts `databaseResetNotification`. `ChatViewModel` listens for this and shows a warning to the user.
+On startup, if the database is corrupted, `DatabaseManager.shared` catches the error, deletes the corrupt DB files, recreates a fresh database, and posts `databaseResetNotification`. `ThreadManager` listens for this and shows a warning to the user.
+
+### Database Migrations
+`Migrations.swift` registers incremental schema migrations via GRDB's `DatabaseMigrator`:
+- **v2-threads**: Creates threads table, migrates legacy single-session conversations to thread records
+- **v3-draft-emails**: Creates draft_emails table for compose/send workflow
 
 ## SwiftAnthropic API (v2.2.x)
 - Model enum: `.other("model-id")` (not `.custom()`)
@@ -146,8 +170,8 @@ try dbQueue.writeWithoutTransaction { db in
 ### Architecture
 - `SecretaryApp.registerBackgroundTask()` — registers handler (must be `nonisolated static`)
 - `BackgroundTaskCoordinator` — thread-safe singleton (`@unchecked Sendable` + NSLock), NOT `@MainActor`
-- `ChatViewModel.beginBackgroundProcessing()` — submits BGContinuedProcessingTaskRequest, falls back to `beginBackgroundTask` on Simulator
-- `ChatViewModel.endBackgroundProcessing()` — calls `markFinished()` to unblock the handler
+- `ThreadManager.beginBackgroundProcessing()` — submits BGContinuedProcessingTaskRequest, falls back to `beginBackgroundTask` on Simulator
+- `ThreadManager.endBackgroundProcessing()` — calls `markFinished()` to unblock the handler
 
 ### Critical rules
 1. **Handler MUST block** — returning immediately from the BGTask handler causes SIGTRAP. Use `while !isFinished && !wasExpired { sleep(1) }`
@@ -196,6 +220,12 @@ xcrun devicectl device install app --device 00008150-0002456A0C47801C <path-to>.
 xcrun devicectl device process launch --device 00008150-0002456A0C47801C --console com.secretary.ios
 # Use NSLog (not os.Logger) — NSLog shows up in --console output reliably
 ```
+
+## SMTP / Email Compose
+- `SMTPClient` (actor): NWConnection with implicit TLS to `smtp.mail.me.com:465`, AUTH PLAIN
+- Compose workflow: `compose_email` → `update_draft` → `send_drafts` (stage-then-send pattern)
+- Drafts stored in `draft_emails` table, reviewed before sending
+- 5 compose tools: `compose_email`, `update_draft`, `remove_draft`, `show_drafts`, `send_drafts`
 
 ## Future: macOS Messages Companion
 Architecture supports adding `MessagesService` that calls a macOS companion HTTP server (via Cloudflare Tunnel) to serve iMessage/SMS data. Add tools to `ToolDefinitions.swift`, dispatch in `ToolExecutor.swift`.
