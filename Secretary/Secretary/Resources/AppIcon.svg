@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background: warm amber to deep terra cotta -->
+    <linearGradient id="bg" x1="0.15" y1="0.05" x2="0.85" y2="0.95">
+      <stop offset="0%" stop-color="#EFA068"/>
+      <stop offset="100%" stop-color="#C04E30"/>
+    </linearGradient>
+
+    <!-- Subtle center glow for depth -->
+    <radialGradient id="glow" cx="0.5" cy="0.46" r="0.5">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Envelope flap gradient -->
+    <linearGradient id="flapGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#F3EDE5"/>
+      <stop offset="100%" stop-color="#EBE3D8"/>
+    </linearGradient>
+
+    <!-- Sparkle gradient: warm sienna to deep terra cotta -->
+    <linearGradient id="sparkleGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#E08050"/>
+      <stop offset="100%" stop-color="#C45535"/>
+    </linearGradient>
+
+    <!-- Shadow filters -->
+    <filter id="envShadow" x="-8%" y="-5%" width="116%" height="120%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#4A1808" flood-opacity="0.28"/>
+    </filter>
+
+    <filter id="sparkleShadow" x="-12%" y="-8%" width="124%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="14" flood-color="#4A1808" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#glow)"/>
+
+  <!-- ====== ENVELOPE ====== -->
+  <g filter="url(#envShadow)">
+    <!-- Envelope body -->
+    <rect x="148" y="355" width="728" height="395" rx="16" fill="#FBF7F1"/>
+
+    <!-- Envelope flap (triangular) -->
+    <path d="M 164 371 Q 148 355 168 355 L 856 355 Q 876 355 860 371 L 512 568 Z"
+          fill="url(#flapGrad)"/>
+
+    <!-- Flap fold lines -->
+    <line x1="164" y1="371" x2="512" y2="568" stroke="#D8CFBF" stroke-width="1.5" opacity="0.6"/>
+    <line x1="860" y1="371" x2="512" y2="568" stroke="#D8CFBF" stroke-width="1.5" opacity="0.6"/>
+
+    <!-- Bottom fold lines -->
+    <line x1="148" y1="750" x2="424" y2="568" stroke="#DDD5C8" stroke-width="1" opacity="0.4"/>
+    <line x1="876" y1="750" x2="600" y2="568" stroke="#DDD5C8" stroke-width="1" opacity="0.4"/>
+  </g>
+
+  <!-- ====== CLAUDE SPARKLE (4-pointed organic star, tight waist) ====== -->
+  <g filter="url(#sparkleShadow)">
+    <path d="M 512 295
+             C 518 475, 530 500, 710 515
+             C 530 530, 518 555, 512 735
+             C 506 555, 494 530, 314 515
+             C 494 500, 506 475, 512 295 Z"
+          fill="url(#sparkleGrad)"/>
+  </g>
+</svg>
