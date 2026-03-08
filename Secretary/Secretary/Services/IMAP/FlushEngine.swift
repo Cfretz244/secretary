@@ -110,6 +110,7 @@ enum FlushEngine {
         db: DatabaseQueue,
         dryRun: Bool = false,
         progress: ((Int, Int) -> Void)? = nil,
+        syncProgress: ((String, Int, Int) -> Void)? = nil,
         cancelled: (() -> Bool)? = nil
     ) async throws -> [FlushResult] {
         let changes = try await db.read { db in try StagedChangeRepository.getAll(db) }
@@ -279,8 +280,10 @@ enum FlushEngine {
                 if let target = c.targetFolder { affected.insert(target) }
             }
             for folder in affected {
+                if isCancelled() { break }
                 do {
-                    _ = try await SyncEngine.syncFolder(db: db, folderName: folder)
+                    _ = try await SyncEngine.syncFolder(db: db, folderName: folder,
+                                                         progress: syncProgress)
                 } catch {
                     logger.error("Post-flush sync error for \(folder): \(error)")
                 }

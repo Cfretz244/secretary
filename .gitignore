@@ -1,7 +1,7 @@
 # Xcode build
 Secretary/build/
 DerivedData/
-*.xcuserdata
+xcuserdata/
 
 # SPM
 .build/

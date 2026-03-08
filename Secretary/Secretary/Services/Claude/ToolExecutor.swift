@@ -163,7 +163,17 @@ final class ToolExecutor: @unchecked Sendable {
 
         case "flush_changes":
             let dryRun = args["dry_run"] as? Bool ?? false
-            let results = try await FlushEngine.flushChanges(db: db, dryRun: dryRun)
+            let progress = onProgress
+            let results = try await FlushEngine.flushChanges(db: db, dryRun: dryRun,
+                                                              progress: { done, total in
+                progress?("Flushing: \(done)/\(total) changes")
+            }, syncProgress: { folder, done, total in
+                if total > 0 {
+                    progress?("Re-syncing \(folder): \(done)/\(total)")
+                } else {
+                    progress?("Re-syncing \(folder)...")
+                }
+            })
             if results.isEmpty { return "No staged changes to flush." }
             let prefix = dryRun ? "[DRY RUN] " : ""
             let lines = results.map { r in
