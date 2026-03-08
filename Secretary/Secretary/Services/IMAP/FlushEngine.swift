@@ -175,17 +175,39 @@ enum FlushEngine {
                     if isCancelled() { break }
                     let batch = Array(group[i..<min(i + AppConfig.flushBatchSize, group.count)])
                     let uids = batch.map(\.uid)
+                    let isAdd = batch[0].changeType == "flag"
+                    let flagName = batch[0].flagName ?? ""
                     do {
-                        if batch[0].changeType == "flag" {
-                            try await imap.addFlags(uids: uids, flags: "(\(batch[0].flagName ?? ""))")
+                        if isAdd {
+                            try await imap.addFlags(uids: uids, flags: "(\(flagName))")
                             flushResult.flagsSet += batch.count
                         } else {
-                            try await imap.removeFlags(uids: uids, flags: "(\(batch[0].flagName ?? ""))")
+                            try await imap.removeFlags(uids: uids, flags: "(\(flagName))")
                             flushResult.flagsRemoved += batch.count
                         }
                         let idsToDelete = batch.compactMap(\.id)
+                        let messageIds = batch.map(\.messageId)
                         try await db.write { db in
                             _ = try StagedChangeRepository.deleteBulk(db, changeIds: idsToDelete)
+                            // Update local message flags to match IMAP
+                            for msgId in messageIds {
+                                if let msg = try MessageRepository.getById(db, id: msgId) {
+                                    let updatedFlags: String
+                                    if isAdd {
+                                        if msg.flags.contains(flagName) {
+                                            updatedFlags = msg.flags
+                                        } else {
+                                            updatedFlags = msg.flags.isEmpty ? flagName : "\(msg.flags) \(flagName)"
+                                        }
+                                    } else {
+                                        updatedFlags = msg.flags
+                                            .replacingOccurrences(of: flagName, with: "")
+                                            .replacingOccurrences(of: "  ", with: " ")
+                                            .trimmingCharacters(in: .whitespaces)
+                                    }
+                                    try MessageRepository.updateFlags(db, messageId: msgId, flags: updatedFlags)
+                                }
+                            }
                         }
                     } catch {
                         flushResult.errors.append("Flag batch: \(error)")

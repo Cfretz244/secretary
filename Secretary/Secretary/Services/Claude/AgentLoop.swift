@@ -193,6 +193,26 @@ actor AgentLoop {
                 messages.append(MessageParameter.Message(role: .assistant, content: .list(assistantContent)))
                 messages.append(MessageParameter.Message(role: .user, content: .list(toolResultObjects)))
 
+            } catch let apiError as APIError {
+                let desc = apiError.displayDescription
+                logger.error("API error: \(desc)")
+                if desc.contains("overloaded") || desc.contains("529") {
+                    continuation.yield(.error("Claude is overloaded. Please try again in a moment."))
+                } else if desc.contains("rate") || desc.contains("429") {
+                    continuation.yield(.error("Rate limited. Please wait a moment and try again."))
+                } else if desc.contains("too long") || desc.contains("too many tokens") || desc.contains("context") {
+                    // Trim history aggressively and inform user
+                    let sid = sessionId
+                    try? await db.write { db in
+                        _ = try ConversationRepository.trimHistory(db, sessionId: sid, keepRecent: 10)
+                    }
+                    continuation.yield(.error("Conversation too long — older history has been trimmed. Please try again."))
+                } else {
+                    continuation.yield(.error("API error: \(desc)"))
+                }
+                continuation.yield(.done)
+                continuation.finish()
+                return
             } catch {
                 logger.error("Agent loop error: \(error)")
                 continuation.yield(.error("Something went wrong: \(error.localizedDescription)"))

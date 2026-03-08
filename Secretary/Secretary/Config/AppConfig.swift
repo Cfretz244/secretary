@@ -17,7 +17,7 @@ enum AppConfig {
     static let agentMaxTokens = 4096
 
     // Conversation trimming
-    static let trimThreshold = 200
-    static let trimKeep = 100
-    static let maxContextChars = 150_000
+    static let trimThreshold = 80
+    static let trimKeep = 40
+    static let maxContextChars = 80_000
 }
