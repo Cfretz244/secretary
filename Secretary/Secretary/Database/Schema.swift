@@ -119,6 +119,17 @@ enum Schema {
             """)
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority, id)")
 
+        // threads
+        try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS threads (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_threads_updated ON threads(updated_at)")
+
         // conversations
         try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS conversations (

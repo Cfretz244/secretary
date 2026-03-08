@@ -53,22 +53,23 @@ struct SecretaryApp: App {
     }
 }
 
-/// Thread-safe coordinator between BGTask handler (background queue) and ChatViewModel (main queue).
+/// Thread-safe coordinator between BGTask handler (background queue) and ThreadManager (main queue).
+/// Uses reference counting so multiple concurrent agent loops keep the task alive.
 final class BackgroundTaskCoordinator: @unchecked Sendable {
     static let shared = BackgroundTaskCoordinator()
 
     private let lock = NSLock()
     private var _task: BGContinuedProcessingTask?
-    private var _isFinished = false
+    private var _activeCount: Int = 0
     private var _onExpiration: (() -> Void)?
 
     var task: BGContinuedProcessingTask? {
         get { lock.withLock { _task } }
-        set { lock.withLock { _task = newValue; if newValue != nil { _isFinished = false } } }
+        set { lock.withLock { _task = newValue } }
     }
 
     var isFinished: Bool {
-        get { lock.withLock { _isFinished } }
+        lock.withLock { _activeCount <= 0 }
     }
 
     var onExpiration: (() -> Void)? {
@@ -76,8 +77,16 @@ final class BackgroundTaskCoordinator: @unchecked Sendable {
         set { lock.withLock { _onExpiration = newValue } }
     }
 
-    func markFinished() {
-        lock.withLock { _isFinished = true }
+    func incrementActive() {
+        lock.withLock { _activeCount += 1 }
+    }
+
+    func decrementActive() {
+        lock.withLock { _activeCount = max(0, _activeCount - 1) }
+    }
+
+    func resetActive() {
+        lock.withLock { _activeCount = 0 }
     }
 
     func updateProgress(completed: Int64, total: Int64) {

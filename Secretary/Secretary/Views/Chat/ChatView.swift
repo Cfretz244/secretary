@@ -1,87 +1,40 @@
 import SwiftUI
 
 struct ChatView: View {
-    @StateObject private var viewModel = ChatViewModel()
+    @EnvironmentObject var threadManager: ThreadManager
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
-    @State private var isNearBottom = true
+    @State private var showThreadList = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Messages
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            ForEach(viewModel.messages) { message in
-                                MessageBubbleView(message: message)
-                                    .id(message.id)
-                            }
-                            // Anchor at the very bottom for scroll tracking
-                            Color.clear
-                                .frame(height: 1)
-                                .id("bottom")
-                                .onAppear { isNearBottom = true }
-                                .onDisappear { isNearBottom = false }
-                        }
-                        .padding()
-                    }
-                    .onChange(of: viewModel.messages.count) { _, _ in
-                        if isNearBottom, let last = viewModel.messages.last {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
-                        }
-                    }
-                    .onChange(of: viewModel.messages.last?.text) { _, _ in
-                        if isNearBottom {
-                            proxy.scrollTo("bottom")
-                        }
-                    }
-                    .onChange(of: viewModel.messages.last?.toolCalls) { _, _ in
-                        if isNearBottom {
-                            proxy.scrollTo("bottom")
-                        }
-                    }
+            Group {
+                if let thread = threadManager.activeThread {
+                    ThreadChatView(thread: thread)
+                } else {
+                    ContentUnavailableView("No Thread", systemImage: "bubble.left",
+                        description: Text("Create a new thread to get started."))
                 }
-
-                Divider()
-
-                // Input bar
-                HStack(spacing: 12) {
-                    TextField("Message...", text: $viewModel.inputText, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(1...5)
-                        .onSubmit {
-                            viewModel.sendMessage()
-                        }
-
-                    Button {
-                        if viewModel.isStreaming {
-                            viewModel.stopStreaming()
-                        } else {
-                            viewModel.sendMessage()
-                        }
-                    } label: {
-                        Image(systemName: viewModel.isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(viewModel.isStreaming ? .red :
-                                viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .gray : .blue)
-                    }
-                    .disabled(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty && !viewModel.isStreaming)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-                .background(.bar)
             }
-            .navigationTitle("Secretary")
+            .navigationTitle(threadManager.activeThread?.title.isEmpty == false
+                ? threadManager.activeThread!.title : "New Thread")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        viewModel.clearConversation()
+                        showThreadList = true
                     } label: {
-                        Image(systemName: "trash")
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "list.bullet")
+                            if threadManager.threads.contains(where: {
+                                $0.isStreaming && $0.id != threadManager.activeThreadId
+                            }) {
+                                Circle()
+                                    .fill(.blue)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -95,11 +48,11 @@ struct ChatView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
-            .onAppear {
-                viewModel.setup()
+            .sheet(isPresented: $showThreadList) {
+                ThreadListView()
             }
             .onChange(of: scenePhase) { _, newPhase in
-                viewModel.handleScenePhase(newPhase)
+                threadManager.handleScenePhase(newPhase)
             }
         }
     }

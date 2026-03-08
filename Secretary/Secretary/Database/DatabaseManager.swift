@@ -58,6 +58,10 @@ final class DatabaseManager: Sendable {
         try dbQueue.write { db in
             try Schema.create(in: db)
         }
+
+        var migrator = DatabaseMigrator()
+        Migrations.register(in: &migrator)
+        try migrator.migrate(dbQueue)
     }
 
     /// In-memory database for testing
@@ -69,6 +73,10 @@ final class DatabaseManager: Sendable {
         try dbQueue.write { db in
             try Schema.create(in: db)
         }
+
+        var migrator = DatabaseMigrator()
+        Migrations.register(in: &migrator)
+        try migrator.migrate(dbQueue)
     }
 
     private static func databasePath() -> String {
