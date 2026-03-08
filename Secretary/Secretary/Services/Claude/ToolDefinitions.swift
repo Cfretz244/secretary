@@ -3,7 +3,7 @@ import SwiftAnthropic
 
 /// All tool definitions in Claude API format. Port of tools.py TOOL_DEFINITIONS.
 enum ToolDefinitions {
-    nonisolated(unsafe) static let all: [MessageParameter.Tool] = emailTools + composeTools + calendarTools
+    nonisolated(unsafe) static let all: [MessageParameter.Tool] = emailTools + composeTools + calendarTools + messagesTools + contactsTools
 
     // MARK: - Email Tools (19)
 
@@ -376,6 +376,116 @@ enum ToolDefinitions {
                     "end_date": .init(type: .string, description: "Search until this date"),
                 ],
                 required: ["query"]
+            )
+        ),
+    ]
+
+    // MARK: - iMessage/SMS Tools (6)
+
+    nonisolated(unsafe) static let messagesTools: [MessageParameter.Tool] = [
+        .function(
+            name: "sync_imessage_conversations",
+            description: "Pull iMessage/SMS conversations from companion server into local cache.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "limit": .init(type: .integer, description: "Max conversations to sync (default 50)"),
+                    "since": .init(type: .string, description: "Only sync conversations with messages after this ISO date"),
+                ],
+                required: nil
+            )
+        ),
+        .function(
+            name: "sync_all_imessages",
+            description: "Pull ALL messages for an iMessage/SMS conversation from companion server into local cache. Fetches every page automatically.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "conversation_id": .init(type: .integer, description: "Conversation ID to sync all messages for"),
+                    "before": .init(type: .string, description: "Only sync messages before this ISO date"),
+                    "after": .init(type: .string, description: "Only sync messages after this ISO date"),
+                ],
+                required: ["conversation_id"]
+            )
+        ),
+        .function(
+            name: "sync_all_imessages_for",
+            description: "Pull ALL messages for a contact by phone number or email. Looks up the conversation, syncs conversations if needed, then fetches all messages.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "identifier": .init(type: .string, description: "Phone number or email address to sync messages for"),
+                    "before": .init(type: .string, description: "Only sync messages before this ISO date"),
+                    "after": .init(type: .string, description: "Only sync messages after this ISO date"),
+                ],
+                required: ["identifier"]
+            )
+        ),
+        .function(
+            name: "list_imessage_conversations",
+            description: "List cached iMessage/SMS conversations.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "limit": .init(type: .integer, description: "Max results (default 50)"),
+                    "offset": .init(type: .integer, description: "Offset for pagination"),
+                ],
+                required: nil
+            )
+        ),
+        .function(
+            name: "get_imessage_conversation",
+            description: "Get cached iMessage/SMS conversation details by ID.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "conversation_id": .init(type: .integer, description: "Conversation ID"),
+                ],
+                required: ["conversation_id"]
+            )
+        ),
+        .function(
+            name: "get_imessages",
+            description: "Get cached messages from an iMessage/SMS conversation.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "conversation_id": .init(type: .integer, description: "Conversation ID"),
+                    "limit": .init(type: .integer, description: "Max messages (default 50)"),
+                    "before": .init(type: .string, description: "Only messages before this ISO date"),
+                    "after": .init(type: .string, description: "Only messages after this ISO date"),
+                    "sort": .init(type: .string, description: "Sort order: 'oldest' for oldest first, 'newest' (default) for newest first"),
+                ],
+                required: ["conversation_id"]
+            )
+        ),
+        .function(
+            name: "search_imessages",
+            description: "Full-text search cached iMessage/SMS text.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "query": .init(type: .string, description: "Search text"),
+                    "conversation_id": .init(type: .integer, description: "Limit to this conversation"),
+                    "limit": .init(type: .integer, description: "Max results (default 20)"),
+                ],
+                required: ["query"]
+            )
+        ),
+    ]
+
+    // MARK: - Contacts Tools (1)
+
+    nonisolated(unsafe) static let contactsTools: [MessageParameter.Tool] = [
+        .function(
+            name: "resolve_contacts",
+            description: "Resolve phone numbers or email addresses to contact names using the device's local Contacts.",
+            inputSchema: JSONSchema(
+                type: .object,
+                properties: [
+                    "identifiers": .init(type: .array, description: "List of phone numbers or email addresses to look up"),
+                ],
+                required: ["identifiers"]
             )
         ),
     ]

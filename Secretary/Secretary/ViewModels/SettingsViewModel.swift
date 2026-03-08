@@ -9,6 +9,11 @@ final class SettingsViewModel: ObservableObject {
     @Published var connectionStatus: String = ""
     @Published var isTesting: Bool = false
 
+    @Published var companionURL: String = ""
+    @Published var companionToken: String = ""
+    @Published var companionStatus: String = ""
+    @Published var isTestingCompanion: Bool = false
+
     init() {
         loadFromKeychain()
     }
@@ -17,6 +22,8 @@ final class SettingsViewModel: ObservableObject {
         icloudEmail = KeychainManager.get(.icloudEmail) ?? ""
         icloudPassword = KeychainManager.get(.icloudPassword) ?? ""
         anthropicAPIKey = KeychainManager.get(.anthropicAPIKey) ?? ""
+        companionURL = KeychainManager.get(.companionURL) ?? ""
+        companionToken = KeychainManager.get(.companionToken) ?? ""
     }
 
     func save() {
@@ -24,9 +31,42 @@ final class SettingsViewModel: ObservableObject {
             try KeychainManager.set(.icloudEmail, value: icloudEmail)
             try KeychainManager.set(.icloudPassword, value: icloudPassword)
             try KeychainManager.set(.anthropicAPIKey, value: anthropicAPIKey)
+            try KeychainManager.set(.companionURL, value: companionURL)
+            try KeychainManager.set(.companionToken, value: companionToken)
             connectionStatus = "Credentials saved."
         } catch {
             connectionStatus = "Failed to save: \(error.localizedDescription)"
+        }
+    }
+
+    func testCompanion() {
+        guard !companionURL.isEmpty, !companionToken.isEmpty else {
+            companionStatus = "Please enter URL and token."
+            return
+        }
+
+        // Save companion credentials before testing
+        do {
+            try KeychainManager.set(.companionURL, value: companionURL)
+            try KeychainManager.set(.companionToken, value: companionToken)
+        } catch {
+            companionStatus = "Failed to save: \(error.localizedDescription)"
+            return
+        }
+
+        isTestingCompanion = true
+        companionStatus = "Testing..."
+
+        Task {
+            do {
+                let db = DatabaseManager.shared.dbQueue
+                let svc = MessagesService(baseURL: companionURL, authToken: companionToken, db: db)
+                let result = try await svc.testConnection()
+                companionStatus = result
+            } catch {
+                companionStatus = "Failed: \(error.localizedDescription)"
+            }
+            isTestingCompanion = false
         }
     }
 

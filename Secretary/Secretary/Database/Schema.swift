@@ -159,5 +159,74 @@ enum Schema {
             """)
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id)")
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(session_id, created_at)")
+
+        // im_conversations
+        try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS im_conversations (
+                id INTEGER PRIMARY KEY,
+                guid TEXT NOT NULL DEFAULT '',
+                chat_identifier TEXT NOT NULL DEFAULT '',
+                display_name TEXT NOT NULL DEFAULT '',
+                service_name TEXT NOT NULL DEFAULT '',
+                is_group INTEGER NOT NULL DEFAULT 0,
+                participants TEXT NOT NULL DEFAULT '',
+                last_message_date TEXT NOT NULL DEFAULT '',
+                message_count INTEGER NOT NULL DEFAULT 0,
+                last_synced_at TEXT
+            )
+            """)
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_im_conv_identifier ON im_conversations(chat_identifier)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_im_conv_date ON im_conversations(last_message_date)")
+
+        // im_messages
+        try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS im_messages (
+                id INTEGER PRIMARY KEY,
+                conversation_id INTEGER NOT NULL REFERENCES im_conversations(id),
+                guid TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL DEFAULT '',
+                is_from_me INTEGER NOT NULL DEFAULT 0,
+                date TEXT NOT NULL DEFAULT '',
+                date_epoch INTEGER NOT NULL DEFAULT 0,
+                sender TEXT NOT NULL DEFAULT '',
+                service TEXT NOT NULL DEFAULT ''
+            )
+            """)
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_im_msg_conv ON im_messages(conversation_id)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_im_msg_date ON im_messages(date_epoch)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_im_msg_sender ON im_messages(sender)")
+
+        // im_messages_fts
+        try db.execute(sql: """
+            CREATE VIRTUAL TABLE IF NOT EXISTS im_messages_fts USING fts5(
+                text,
+                sender,
+                content='im_messages',
+                content_rowid='id'
+            )
+            """)
+
+        try db.execute(sql: """
+            CREATE TRIGGER IF NOT EXISTS im_messages_ai AFTER INSERT ON im_messages BEGIN
+                INSERT INTO im_messages_fts(rowid, text, sender)
+                VALUES (new.id, new.text, new.sender);
+            END
+            """)
+
+        try db.execute(sql: """
+            CREATE TRIGGER IF NOT EXISTS im_messages_ad AFTER DELETE ON im_messages BEGIN
+                INSERT INTO im_messages_fts(im_messages_fts, rowid, text, sender)
+                VALUES ('delete', old.id, old.text, old.sender);
+            END
+            """)
+
+        try db.execute(sql: """
+            CREATE TRIGGER IF NOT EXISTS im_messages_au AFTER UPDATE ON im_messages BEGIN
+                INSERT INTO im_messages_fts(im_messages_fts, rowid, text, sender)
+                VALUES ('delete', old.id, old.text, old.sender);
+                INSERT INTO im_messages_fts(rowid, text, sender)
+                VALUES (new.id, new.text, new.sender);
+            END
+            """)
     }
 }

@@ -66,6 +66,7 @@ enum SecretaryError: LocalizedError {
     case smtpError(String)
     case syncError(String)
     case notFound(String)
+    case companionError(String)
 
     var errorDescription: String? {
         switch self {
@@ -74,6 +75,7 @@ enum SecretaryError: LocalizedError {
         case .smtpError(let msg): return msg
         case .syncError(let msg): return msg
         case .notFound(let msg): return msg
+        case .companionError(let msg): return msg
         }
     }
 }

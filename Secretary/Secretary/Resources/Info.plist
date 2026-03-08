@@ -24,8 +24,17 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Secretary needs calendar access to manage your events.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Secretary uses your contacts to resolve phone numbers and email addresses to names.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Secretary connects to the Messages Companion server on your local network.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

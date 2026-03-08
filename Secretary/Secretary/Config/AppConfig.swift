@@ -22,4 +22,7 @@ enum AppConfig {
     static let trimThreshold = 80
     static let trimKeep = 40
     static let maxContextChars = 80_000
+
+    // Messages companion
+    static let companionTimeout: TimeInterval = 30
 }

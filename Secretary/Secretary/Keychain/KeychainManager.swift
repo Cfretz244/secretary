@@ -8,6 +8,8 @@ enum KeychainManager {
         case icloudEmail = "icloud_email"
         case icloudPassword = "icloud_password"
         case anthropicAPIKey = "anthropic_api_key"
+        case companionURL = "companion_url"
+        case companionToken = "companion_token"
     }
 
     static func get(_ key: Key) -> String? {
@@ -31,4 +33,10 @@ enum KeychainManager {
     static var icloudEmail: String { Self.get(.icloudEmail) ?? "" }
     static var icloudPassword: String { Self.get(.icloudPassword) ?? "" }
     static var anthropicAPIKey: String { Self.get(.anthropicAPIKey) ?? "" }
+    static var companionURL: String { Self.get(.companionURL) ?? "" }
+    static var companionToken: String { Self.get(.companionToken) ?? "" }
+
+    static var hasCompanion: Bool {
+        !companionURL.isEmpty && !companionToken.isEmpty
+    }
 }

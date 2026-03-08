@@ -16,6 +16,7 @@ final class ThreadManager: ObservableObject {
 
     private var claudeService: ClaudeService?
     private var calendarService: CalendarService?
+    private var messagesService: MessagesService?
     private let db: DatabaseQueue = DatabaseManager.shared.dbQueue
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
     private var progressTimer: Task<Void, Never>?
@@ -26,6 +27,11 @@ final class ThreadManager: ObservableObject {
         guard KeychainManager.hasCredentials else { return }
         claudeService = ClaudeService(apiKey: KeychainManager.anthropicAPIKey)
         calendarService = CalendarService()
+
+        if let url = KeychainManager.get(.companionURL), !url.isEmpty,
+           let token = KeychainManager.get(.companionToken), !token.isEmpty {
+            messagesService = MessagesService(baseURL: url, authToken: token, db: db)
+        }
 
         loadThreads()
 
@@ -43,25 +49,27 @@ final class ThreadManager: ObservableObject {
     }
 
     private func loadThreads() {
-        do {
-            let dbThreads: [ConversationThread] = try db.read { db in
-                try ThreadRepository.getAll(db)
-            }
-            if dbThreads.isEmpty {
-                let thread = createThreadSync(title: "")
-                activeThreadId = thread.id
-                loadHistory(for: thread)
-            } else {
-                threads = dbThreads.map { ThreadState(from: $0) }
-                activeThreadId = threads.first?.id
-                if let active = activeThread {
-                    loadHistory(for: active)
+        Task {
+            do {
+                let dbThreads: [ConversationThread] = try await db.read { db in
+                    try ThreadRepository.getAll(db)
                 }
+                if dbThreads.isEmpty {
+                    let thread = await createThreadAsync(title: "")
+                    activeThreadId = thread.id
+                    await loadHistory(for: thread)
+                } else {
+                    threads = dbThreads.map { ThreadState(from: $0) }
+                    activeThreadId = threads.first?.id
+                    if let active = activeThread {
+                        await loadHistory(for: active)
+                    }
+                }
+            } catch {
+                NSLog("[ThreadManager] Failed to load threads: %@", "\(error)")
+                let thread = await createThreadAsync(title: "")
+                activeThreadId = thread.id
             }
-        } catch {
-            NSLog("[ThreadManager] Failed to load threads: %@", "\(error)")
-            let thread = createThreadSync(title: "")
-            activeThreadId = thread.id
         }
     }
 
@@ -69,16 +77,22 @@ final class ThreadManager: ObservableObject {
 
     @discardableResult
     func createThread(title: String = "") -> ThreadState {
-        let thread = createThreadSync(title: title)
-        activeThreadId = thread.id
-        return thread
+        let dbThread = ConversationThread(title: title)
+        let state = ThreadState(from: dbThread)
+        threads.insert(state, at: 0)
+        activeThreadId = state.id
+        Task {
+            try? await db.write { db in
+                try ThreadRepository.insert(db, thread: dbThread)
+            }
+        }
+        return state
     }
 
-    @discardableResult
-    private func createThreadSync(title: String) -> ThreadState {
+    private func createThreadAsync(title: String) async -> ThreadState {
         let dbThread = ConversationThread(title: title)
         do {
-            try db.write { db in
+            try await db.write { db in
                 try ThreadRepository.insert(db, thread: dbThread)
             }
         } catch {
@@ -92,7 +106,7 @@ final class ThreadManager: ObservableObject {
     func switchToThread(id: String) {
         activeThreadId = id
         if let thread = activeThread, !thread.historyLoaded {
-            loadHistory(for: thread)
+            Task { await loadHistory(for: thread) }
         }
     }
 
@@ -100,32 +114,29 @@ final class ThreadManager: ObservableObject {
         guard let thread = threads.first(where: { $0.id == id }) else { return }
         stopStreaming(in: thread)
 
-        do {
-            try db.write { db in
+        threads.removeAll { $0.id == id }
+
+        Task {
+            try? await db.write { db in
                 try ThreadRepository.delete(db, id: id)
             }
-        } catch {
-            NSLog("[ThreadManager] Failed to delete thread: %@", "\(error)")
         }
-
-        threads.removeAll { $0.id == id }
 
         if activeThreadId == id {
             if let first = threads.first {
                 switchToThread(id: first.id)
             } else {
-                let newThread = createThreadSync(title: "")
-                activeThreadId = newThread.id
+                createThread(title: "")
             }
         }
     }
 
     // MARK: - History
 
-    private func loadHistory(for thread: ThreadState) {
+    private func loadHistory(for thread: ThreadState) async {
         let sid = thread.id
         do {
-            let turns: [ConversationTurn] = try db.read { db in
+            let turns: [ConversationTurn] = try await db.read { db in
                 try ConversationRepository.getHistory(db, sessionId: sid)
             }
             thread.historyLoaded = true
@@ -241,7 +252,11 @@ final class ThreadManager: ObservableObject {
         // Create agent loop + tool executor if needed
         if thread.agentLoop == nil, let claudeService, let calendarService {
             let toolExecutor = ToolExecutor(db: db, calendarService: calendarService)
+            toolExecutor.messagesService = resolveMessagesService()
             thread.agentLoop = AgentLoop(claudeService: claudeService, toolExecutor: toolExecutor, db: db)
+        } else if let agentLoop = thread.agentLoop {
+            // Update messagesService on existing agent loop in case credentials changed
+            Task { await agentLoop.updateMessagesService(resolveMessagesService()) }
         }
 
         thread.runningTask = Task {
@@ -335,6 +350,27 @@ final class ThreadManager: ObservableObject {
                 thread.messages[idx].text = "\(reason)."
             }
         }
+    }
+
+    private var cachedCompanionURL: String = ""
+    private var cachedCompanionToken: String = ""
+
+    private func resolveMessagesService() -> MessagesService? {
+        let url = KeychainManager.get(.companionURL) ?? ""
+        let token = KeychainManager.get(.companionToken) ?? ""
+        guard !url.isEmpty, !token.isEmpty else {
+            messagesService = nil
+            return nil
+        }
+        // Reuse cached service if credentials haven't changed
+        if let existing = messagesService, url == cachedCompanionURL, token == cachedCompanionToken {
+            return existing
+        }
+        cachedCompanionURL = url
+        cachedCompanionToken = token
+        let svc = MessagesService(baseURL: url, authToken: token, db: db)
+        messagesService = svc
+        return svc
     }
 
     // MARK: - Scene phase

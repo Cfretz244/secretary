@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Contacts
 import os
 
 /// Routes tool calls to the appropriate service. Port of tools.py _dispatch.
@@ -10,6 +11,9 @@ final class ToolExecutor: @unchecked Sendable {
 
     /// Called with progress detail strings during long-running tools (sync).
     var onProgress: ((String) -> Void)?
+
+    /// Optional Messages companion service for iMessage/SMS tools.
+    var messagesService: MessagesService?
 
     init(db: DatabaseQueue, calendarService: CalendarService) {
         self.db = db
@@ -403,6 +407,121 @@ final class ToolExecutor: @unchecked Sendable {
                 endDate: args["end_date"] as? String
             )
 
+        // Contacts tools
+        case "resolve_contacts":
+            let identifiers = args["identifiers"] as? [String] ?? []
+            guard !identifiers.isEmpty else { return "No identifiers provided." }
+            return Self.resolveContacts(identifiers)
+
+        // iMessage/SMS tools
+        case "sync_imessage_conversations":
+            guard let svc = messagesService else { return "Messages companion not configured. Set up in Settings." }
+            let limit = args["limit"] as? Int ?? 50
+            let since = args["since"] as? String
+            return try await svc.syncConversations(limit: limit, since: since)
+
+        case "sync_all_imessages":
+            guard let svc = messagesService else { return "Messages companion not configured. Set up in Settings." }
+            let convId = Self.int64Arg(args, "conversation_id")
+            let before = args["before"] as? String
+            let after = args["after"] as? String
+            let progress = onProgress
+            return try await svc.syncAllMessages(chatId: convId, before: before, after: after, progress: { synced, _ in
+                progress?("Syncing messages: \(synced) fetched...")
+            })
+
+        case "sync_all_imessages_for":
+            guard let svc = messagesService else { return "Messages companion not configured. Set up in Settings." }
+            let identifier = args["identifier"] as? String ?? ""
+            let before = args["before"] as? String
+            let after = args["after"] as? String
+            let progress = onProgress
+
+            // Look up conversation by identifier; sync conversations first if not found
+            var conv = try await svc.getConversationByIdentifier(identifier)
+            if conv == nil {
+                progress?("Syncing conversations to find \(identifier)...")
+                _ = try await svc.syncConversations(limit: 200)
+                conv = try await svc.getConversationByIdentifier(identifier)
+            }
+            guard let conv, let convId = conv.id else {
+                return "No conversation found for '\(identifier)'. Try sync_imessage_conversations first."
+            }
+            let name = conv.displayName.isEmpty ? conv.chatIdentifier : conv.displayName
+            progress?("Found \(name), fetching messages...")
+            return try await svc.syncAllMessages(chatId: convId, before: before, after: after, progress: { synced, _ in
+                progress?("Syncing \(name): \(synced) messages fetched...")
+            })
+
+        case "list_imessage_conversations":
+            guard let svc = messagesService else { return "Messages companion not configured. Set up in Settings." }
+            let limit = args["limit"] as? Int ?? 50
+            let offset = args["offset"] as? Int ?? 0
+            let conversations = try await svc.listConversations(limit: limit, offset: offset)
+            guard !conversations.isEmpty else { return "No cached iMessage conversations. Try sync_imessage_conversations first." }
+            var lines = ["\(conversations.count) conversation(s):"]
+            for c in conversations {
+                let name = c.displayName.isEmpty ? c.chatIdentifier : c.displayName
+                let group = c.isGroup == 1 ? " [group]" : ""
+                let date = String(c.lastMessageDate.prefix(10))
+                lines.append("  [\(c.id ?? 0)] \(name)\(group) | \(c.participants) | \(date) | \(c.messageCount) msgs")
+            }
+            return lines.joined(separator: "\n")
+
+        case "get_imessage_conversation":
+            guard let svc = messagesService else { return "Messages companion not configured. Set up in Settings." }
+            let convId = Self.int64Arg(args, "conversation_id")
+            guard let conv = try await svc.getConversation(chatId: convId) else {
+                return "Conversation \(convId) not found."
+            }
+            let name = conv.displayName.isEmpty ? conv.chatIdentifier : conv.displayName
+            return """
+                ID: \(conv.id ?? 0)
+                Name: \(name)
+                Identifier: \(conv.chatIdentifier)
+                Service: \(conv.serviceName)
+                Group: \(conv.isGroup == 1 ? "Yes" : "No")
+                Participants: \(conv.participants)
+                Messages: \(conv.messageCount)
+                Last message: \(conv.lastMessageDate)
+                Last synced: \(conv.lastSyncedAt ?? "never")
+                """
+
+        case "get_imessages":
+            guard let svc = messagesService else { return "Messages companion not configured. Set up in Settings." }
+            let convId = Self.int64Arg(args, "conversation_id")
+            let limit = args["limit"] as? Int ?? 50
+            let before = args["before"] as? String
+            let after = args["after"] as? String
+            let ascending = (args["sort"] as? String)?.lowercased() == "oldest"
+            let messages = try await svc.getMessages(chatId: convId, limit: limit, before: before, after: after, ascending: ascending)
+            guard !messages.isEmpty else { return "No cached messages. Try sync_imessages first." }
+            var lines = ["\(messages.count) message(s):"]
+            for m in messages {
+                let who = m.isFromMe == 1 ? "me" : m.sender
+                let date = String(m.date.prefix(19))
+                let text = String(m.text.prefix(100))
+                lines.append("  [\(m.id ?? 0)] \(date) | \(who): \(text)")
+            }
+            return lines.joined(separator: "\n")
+
+        case "search_imessages":
+            guard let svc = messagesService else { return "Messages companion not configured. Set up in Settings." }
+            let query = args["query"] as? String ?? ""
+            let convId: Int64? = (args["conversation_id"] as? Int).map(Int64.init)
+                ?? (args["conversation_id"] as? Double).map { Int64($0) }
+            let limit = args["limit"] as? Int ?? 20
+            let messages = try await svc.searchMessages(query: query, conversationId: convId, limit: limit)
+            guard !messages.isEmpty else { return "No messages matching '\(query)'." }
+            var lines = ["\(messages.count) result(s) for '\(query)':"]
+            for m in messages {
+                let who = m.isFromMe == 1 ? "me" : m.sender
+                let date = String(m.date.prefix(19))
+                let text = String(m.text.prefix(100))
+                lines.append("  [\(m.id ?? 0)] conv:\(m.conversationId) \(date) | \(who): \(text)")
+            }
+            return lines.joined(separator: "\n")
+
         default:
             return "Unknown tool: \(name)"
         }
@@ -443,6 +562,53 @@ final class ToolExecutor: @unchecked Sendable {
         ]
         for c in rule.conditions { lines.append("  \(c.field) \(c.op) '\(c.value)'") }
         return lines.joined(separator: "\n")
+    }
+
+    nonisolated private static func resolveContacts(_ identifiers: [String]) -> String {
+        let store = CNContactStore()
+        let keysToFetch: [CNKeyDescriptor] = [
+            CNContactGivenNameKey as CNKeyDescriptor,
+            CNContactFamilyNameKey as CNKeyDescriptor,
+            CNContactOrganizationNameKey as CNKeyDescriptor,
+            CNContactPhoneNumbersKey as CNKeyDescriptor,
+            CNContactEmailAddressesKey as CNKeyDescriptor,
+        ]
+        var results: [String] = []
+        for identifier in identifiers {
+            let cleaned = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty else { continue }
+
+            var matched: CNContact?
+
+            // Try as phone number
+            let phoneNumber = CNPhoneNumber(stringValue: cleaned)
+            let phonePredicate = CNContact.predicateForContacts(matching: phoneNumber)
+            if let contacts = try? store.unifiedContacts(matching: phonePredicate, keysToFetch: keysToFetch),
+               let first = contacts.first {
+                matched = first
+            }
+
+            // Try as email if phone didn't match
+            if matched == nil {
+                let emailPredicate = CNContact.predicateForContacts(matchingEmailAddress: cleaned)
+                if let contacts = try? store.unifiedContacts(matching: emailPredicate, keysToFetch: keysToFetch),
+                   let first = contacts.first {
+                    matched = first
+                }
+            }
+
+            if let contact = matched {
+                var name = [contact.givenName, contact.familyName]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+                if name.isEmpty { name = contact.organizationName }
+                if name.isEmpty { name = "(no name)" }
+                results.append("  \(cleaned) → \(name)")
+            } else {
+                results.append("  \(cleaned) → (unknown)")
+            }
+        }
+        return "Resolved \(identifiers.count) identifier(s):\n" + results.joined(separator: "\n")
     }
 
     nonisolated private static func formatApplyResult(_ result: ApplyRulesResult) -> String {

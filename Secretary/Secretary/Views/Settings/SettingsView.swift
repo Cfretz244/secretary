@@ -43,6 +43,29 @@ struct SettingsView: View {
                     .disabled(!viewModel.hasCredentials)
                 }
 
+                Section("Messages Companion") {
+                    TextField("Companion URL", text: $viewModel.companionURL)
+                        .autocapitalization(.none)
+                        .keyboardType(.URL)
+                    SecureField("Auth Token", text: $viewModel.companionToken)
+                        .textContentType(.password)
+
+                    Button("Test Connection") {
+                        viewModel.testCompanion()
+                    }
+                    .disabled(viewModel.isTestingCompanion)
+
+                    if !viewModel.companionStatus.isEmpty {
+                        Text(viewModel.companionStatus)
+                            .font(.caption)
+                            .foregroundStyle(viewModel.companionStatus.contains("Connected") ? .green : .secondary)
+                    }
+
+                    Text("Run the companion server on your Mac to access iMessages.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Data") {
                     Button("Reset Database", role: .destructive) {
                         showResetConfirmation = true
@@ -83,6 +106,9 @@ struct SettingsView: View {
                     DROP TABLE IF EXISTS messages_fts;
                     DROP TABLE IF EXISTS messages;
                     DROP TABLE IF EXISTS folders;
+                    DROP TABLE IF EXISTS im_messages_fts;
+                    DROP TABLE IF EXISTS im_messages;
+                    DROP TABLE IF EXISTS im_conversations;
                 """)
                 try Schema.create(in: db)
             }

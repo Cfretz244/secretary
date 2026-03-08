@@ -35,6 +35,10 @@ actor AgentLoop {
         innerTask = nil
     }
 
+    func updateMessagesService(_ service: MessagesService?) {
+        toolExecutor.messagesService = service
+    }
+
     func run(sessionId: String, userMessage: String) -> AsyncStream<StreamEvent> {
         cancelled = false
         innerTask?.cancel()

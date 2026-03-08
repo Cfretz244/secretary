@@ -57,5 +57,9 @@ targets:
         UILaunchScreen:
           UIColorName: ""
         NSCalendarsFullAccessUsageDescription: "Secretary needs calendar access to manage your events."
+        NSContactsUsageDescription: "Secretary uses your contacts to resolve phone numbers and email addresses to names."
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: "Secretary connects to the Messages Companion server on your local network."
         BGTaskSchedulerPermittedIdentifiers:
           - $(PRODUCT_BUNDLE_IDENTIFIER).background
