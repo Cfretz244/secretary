@@ -30,7 +30,7 @@ struct ChatView: View {
                                 $0.isStreaming && $0.id != threadManager.activeThreadId
                             }) {
                                 Circle()
-                                    .fill(.blue)
+                                    .fill(.teal)
                                     .frame(width: 8, height: 8)
                                     .offset(x: 4, y: -4)
                             }
@@ -54,6 +54,7 @@ struct ChatView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 threadManager.handleScenePhase(newPhase)
             }
+            .tint(.teal)
         }
     }
 }

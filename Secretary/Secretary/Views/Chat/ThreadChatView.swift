@@ -42,34 +42,43 @@ struct ThreadChatView: View {
                 }
             }
 
-            Divider()
-
             // Input bar
-            HStack(spacing: 12) {
-                TextField("Message...", text: $thread.inputText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...5)
-                    .onSubmit {
-                        threadManager.sendMessage(in: thread)
-                    }
+            VStack(spacing: 0) {
+                Divider()
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField("Message...", text: $thread.inputText, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1...5)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color(.tertiarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .strokeBorder(Color(.separator).opacity(0.3), lineWidth: 0.5)
+                        )
+                        .onSubmit {
+                            threadManager.sendMessage(in: thread)
+                        }
 
-                Button {
-                    if thread.isStreaming {
-                        threadManager.stopStreaming(in: thread)
-                    } else {
-                        threadManager.sendMessage(in: thread)
+                    Button {
+                        if thread.isStreaming {
+                            threadManager.stopStreaming(in: thread)
+                        } else {
+                            threadManager.sendMessage(in: thread)
+                        }
+                    } label: {
+                        Image(systemName: thread.isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(thread.isStreaming ? .red :
+                                thread.inputText.trimmingCharacters(in: .whitespaces).isEmpty ? Color(.tertiaryLabel) : .teal)
                     }
-                } label: {
-                    Image(systemName: thread.isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(thread.isStreaming ? .red :
-                            thread.inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .gray : .blue)
+                    .disabled(thread.inputText.trimmingCharacters(in: .whitespaces).isEmpty && !thread.isStreaming)
                 }
-                .disabled(thread.inputText.trimmingCharacters(in: .whitespaces).isEmpty && !thread.isStreaming)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.bar)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 10)
-            .background(.bar)
         }
     }
 }

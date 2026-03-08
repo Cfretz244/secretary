@@ -35,6 +35,7 @@
 		893CDE2AFD849CE1127FBAD9 /* Migrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D2E7C6C8F5F27E18B149D9 /* Migrations.swift */; };
 		89874919231994F5B4F857AE /* ThreadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A482990A270E6036C7AE2B5 /* ThreadManager.swift */; };
 		8B9B3475A715268D16BE4183 /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = FA0926E33B57DBE3DA290ABA /* KeychainAccess */; };
+		8C40F9AEEFF60DF4D6E2FF3D /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D632AFAB3033FDFD25D1C55A /* MarkdownView.swift */; };
 		8C5240778FF0BC5F6E121E55 /* IMAPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C88201780B6821DADD14B4F /* IMAPClient.swift */; };
 		957B343A5795C3FD294E3C84 /* SwiftAnthropic in Frameworks */ = {isa = PBXBuildFile; productRef = 13D7BDE0404A5454BABB2BA3 /* SwiftAnthropic */; };
 		9627DE4ED66DC1475D90A577 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C5482CD1596216506077A3 /* SyncEngine.swift */; };
@@ -109,6 +110,7 @@
 		CCCA4C4A475422D4319CD3AC /* Secretary.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Secretary.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF24D1B8AB41883A1BD45F66 /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		D11BF90375095DAAA21EEEDA /* RuleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleRepository.swift; sourceTree = "<group>"; };
+		D632AFAB3033FDFD25D1C55A /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		DD32A8C7C7A7503ABC042D8A /* ToolDefinitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDefinitions.swift; sourceTree = "<group>"; };
 		DE7F8E337749B2F06D326FBB /* Rule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rule.swift; sourceTree = "<group>"; };
 		DF017BA27B82CD716964563B /* SyncResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncResult.swift; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@
 			isa = PBXGroup;
 			children = (
 				5E37FA76FD81CBA58C08064C /* ChatView.swift */,
+				D632AFAB3033FDFD25D1C55A /* MarkdownView.swift */,
 				420531A2857DF979E0EE3F8E /* MessageBubbleView.swift */,
 				5438FBD317F8EEE7D228BF04 /* ThreadChatView.swift */,
 				9111FBB8393ABD0D1CB39EE7 /* ToolCallView.swift */,
@@ -433,6 +436,7 @@
 				84EBD6C85E949E6107368A03 /* IMAPConnection.swift in Sources */,
 				0EE7C79A39E915F5A75B7426 /* IMAPResponseParser.swift in Sources */,
 				6DBB57CE7718E369D140FFA9 /* KeychainManager.swift in Sources */,
+				8C40F9AEEFF60DF4D6E2FF3D /* MarkdownView.swift in Sources */,
 				5E2C3265299F064185B5F95C /* Message.swift in Sources */,
 				E53A21D07CD306FA2CE1614B /* MessageBubbleView.swift in Sources */,
 				349C7F61ECAE1850232ABC67 /* MessageParser.swift in Sources */,

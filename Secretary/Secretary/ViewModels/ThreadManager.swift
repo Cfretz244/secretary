@@ -132,17 +132,20 @@ final class ThreadManager: ObservableObject {
             guard !turns.isEmpty else { return }
 
             var restored: [ChatMessage] = []
+            var hadToolCallsSinceLast = false
 
             for turn in turns {
                 switch turn.role {
                 case "user":
                     restored.append(ChatMessage(role: .user, text: turn.content))
+                    hadToolCallsSinceLast = false
 
                 case "assistant":
-                    if let last = restored.last, last.role == .assistant {
-                        restored[restored.count - 1].text += turn.content
-                    } else {
+                    if hadToolCallsSinceLast || restored.last?.role != .assistant {
                         restored.append(ChatMessage(role: .assistant, text: turn.content))
+                        hadToolCallsSinceLast = false
+                    } else {
+                        restored[restored.count - 1].text += turn.content
                     }
 
                 case "tool_use":
@@ -161,6 +164,7 @@ final class ThreadManager: ObservableObject {
 
                 case "tool_result":
                     guard let toolCallId = turn.toolCallId else { continue }
+                    hadToolCallsSinceLast = true
                     for i in restored.indices.reversed() {
                         if let idx = restored[i].toolCalls.firstIndex(where: { $0.id == toolCallId }) {
                             restored[i].toolCalls[idx].status = .completed
@@ -242,39 +246,48 @@ final class ThreadManager: ObservableObject {
 
             let stream = await agentLoop.run(sessionId: thread.id, userMessage: text)
 
+            var currentAssistantIndex = assistantIndex
+            var toolCallsOnCurrent = false
+
             for await event in stream {
                 if Task.isCancelled { break }
                 switch event {
                 case .textDelta(let delta):
-                    thread.messages[assistantIndex].text += delta
+                    if toolCallsOnCurrent {
+                        thread.messages.append(ChatMessage(role: .assistant, text: ""))
+                        currentAssistantIndex = thread.messages.count - 1
+                        toolCallsOnCurrent = false
+                    }
+                    thread.messages[currentAssistantIndex].text += delta
                     BackgroundTaskCoordinator.shared.updateSubtitle("Responding...")
 
                 case .toolStart(let name, let id):
-                    thread.messages[assistantIndex].toolCalls.append(
+                    toolCallsOnCurrent = true
+                    thread.messages[currentAssistantIndex].toolCalls.append(
                         ChatMessage.ToolCallStatus(id: id, name: name, status: .running, detail: nil)
                     )
                     BackgroundTaskCoordinator.shared.updateSubtitle("Running \(name)...")
 
                 case .toolProgress(let id, let detail):
-                    if let idx = thread.messages[assistantIndex].toolCalls.firstIndex(where: { $0.id == id }) {
-                        thread.messages[assistantIndex].toolCalls[idx].detail = detail
+                    if let idx = thread.messages[currentAssistantIndex].toolCalls.firstIndex(where: { $0.id == id }) {
+                        thread.messages[currentAssistantIndex].toolCalls[idx].detail = detail
                     }
                     BackgroundTaskCoordinator.shared.updateSubtitle(detail)
 
                 case .toolDone(_, let id):
-                    if let idx = thread.messages[assistantIndex].toolCalls.firstIndex(where: { $0.id == id }) {
-                        thread.messages[assistantIndex].toolCalls[idx].status = .completed
-                        thread.messages[assistantIndex].toolCalls[idx].detail = nil
+                    if let idx = thread.messages[currentAssistantIndex].toolCalls.firstIndex(where: { $0.id == id }) {
+                        thread.messages[currentAssistantIndex].toolCalls[idx].status = .completed
+                        thread.messages[currentAssistantIndex].toolCalls[idx].detail = nil
                     }
 
                 case .error(let errorText):
-                    if thread.messages[assistantIndex].text.isEmpty {
-                        thread.messages[assistantIndex].text = errorText
+                    if thread.messages[currentAssistantIndex].text.isEmpty {
+                        thread.messages[currentAssistantIndex].text = errorText
                     }
 
                 case .done:
-                    if thread.messages[assistantIndex].text.isEmpty && thread.messages[assistantIndex].toolCalls.isEmpty {
-                        thread.messages[assistantIndex].text = "Done."
+                    if thread.messages[currentAssistantIndex].text.isEmpty && thread.messages[currentAssistantIndex].toolCalls.isEmpty {
+                        thread.messages[currentAssistantIndex].text = "Done."
                     }
                 }
             }
@@ -292,20 +305,27 @@ final class ThreadManager: ObservableObject {
         }
         thread.isStreaming = false
         endBackgroundProcessing()
-        if let lastIdx = thread.messages.indices.last, thread.messages[lastIdx].role == .assistant {
-            for i in thread.messages[lastIdx].toolCalls.indices {
-                if thread.messages[lastIdx].toolCalls[i].status == .running {
-                    thread.messages[lastIdx].toolCalls[i].status = .failed("Cancelled")
-                }
-            }
-            if thread.messages[lastIdx].text.isEmpty {
-                thread.messages[lastIdx].text = "Cancelled."
-            }
-        }
+        fixRunningToolCalls(in: thread, reason: "Cancelled")
     }
 
     var anyThreadStreaming: Bool {
         threads.contains { $0.isStreaming }
+    }
+
+    private func fixRunningToolCalls(in thread: ThreadState, reason: String) {
+        for idx in thread.messages.indices.reversed() {
+            guard thread.messages[idx].role == .assistant else { break }
+            var anyFixed = false
+            for j in thread.messages[idx].toolCalls.indices {
+                if thread.messages[idx].toolCalls[j].status == .running {
+                    thread.messages[idx].toolCalls[j].status = .failed(reason)
+                    anyFixed = true
+                }
+            }
+            if anyFixed && thread.messages[idx].text.isEmpty {
+                thread.messages[idx].text = "\(reason)."
+            }
+        }
     }
 
     // MARK: - Scene phase
@@ -313,18 +333,7 @@ final class ThreadManager: ObservableObject {
     func handleScenePhase(_ phase: ScenePhase) {
         if phase == .active {
             for thread in threads where !thread.isStreaming {
-                if let lastIdx = thread.messages.indices.last, thread.messages[lastIdx].role == .assistant {
-                    var anyFixed = false
-                    for i in thread.messages[lastIdx].toolCalls.indices {
-                        if thread.messages[lastIdx].toolCalls[i].status == .running {
-                            thread.messages[lastIdx].toolCalls[i].status = .failed("Interrupted")
-                            anyFixed = true
-                        }
-                    }
-                    if anyFixed && thread.messages[lastIdx].text.isEmpty {
-                        thread.messages[lastIdx].text = "Task was interrupted while the app was in the background."
-                    }
-                }
+                fixRunningToolCalls(in: thread, reason: "Interrupted")
             }
         }
     }
@@ -380,16 +389,7 @@ final class ThreadManager: ObservableObject {
                 await thread.agentLoop?.cancel()
             }
             thread.isStreaming = false
-            if let lastIdx = thread.messages.indices.last, thread.messages[lastIdx].role == .assistant {
-                for i in thread.messages[lastIdx].toolCalls.indices {
-                    if thread.messages[lastIdx].toolCalls[i].status == .running {
-                        thread.messages[lastIdx].toolCalls[i].status = .failed("Background time expired")
-                    }
-                }
-                if thread.messages[lastIdx].text.isEmpty {
-                    thread.messages[lastIdx].text = "Background time expired. Open the app to continue."
-                }
-            }
+            fixRunningToolCalls(in: thread, reason: "Background time expired")
         }
         BackgroundTaskCoordinator.shared.resetActive()
         progressTimer?.cancel()

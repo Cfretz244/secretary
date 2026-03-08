@@ -12,15 +12,23 @@ struct ThreadListView: View {
                         threadManager.switchToThread(id: thread.id)
                         dismiss()
                     } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(thread.title.isEmpty ? "New Thread" : thread.title)
-                                    .font(.body)
+                                    .font(.body.weight(.medium))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
+
+                                if let preview = thread.messages.last(where: { $0.role == .assistant && !$0.text.isEmpty })?.text {
+                                    Text(preview)
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+
                                 Text(thread.createdAt, style: .relative)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.quaternary)
                             }
 
                             Spacer()
@@ -28,11 +36,13 @@ struct ThreadListView: View {
                             if thread.isStreaming {
                                 ProgressView()
                                     .controlSize(.small)
+                                    .tint(.teal)
                             }
 
                             if thread.id == threadManager.activeThreadId {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
+                                    .font(.caption)
+                                    .foregroundStyle(.teal)
                             }
                         }
                     }
@@ -51,6 +61,7 @@ struct ThreadListView: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .tint(.teal)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -59,6 +70,7 @@ struct ThreadListView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .tint(.teal)
                 }
             }
         }
