@@ -5,11 +5,6 @@ struct MessageBubbleView: View {
 
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
-            // Tool calls (inline)
-            ForEach(message.toolCalls) { tool in
-                ToolCallView(toolCall: tool)
-            }
-
             // Text content
             if !message.text.isEmpty {
                 if message.role == .user {
@@ -28,6 +23,11 @@ struct MessageBubbleView: View {
                         .background(Color(.systemGray6))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
+            }
+
+            // Tool calls (below text so they extend downward)
+            ForEach(message.toolCalls) { tool in
+                ToolCallView(toolCall: tool)
             }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)

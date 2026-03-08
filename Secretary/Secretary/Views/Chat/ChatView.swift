@@ -38,6 +38,11 @@ struct ChatView: View {
                             proxy.scrollTo("bottom")
                         }
                     }
+                    .onChange(of: viewModel.messages.last?.toolCalls) { _, _ in
+                        if isNearBottom {
+                            proxy.scrollTo("bottom")
+                        }
+                    }
                 }
 
                 Divider()
