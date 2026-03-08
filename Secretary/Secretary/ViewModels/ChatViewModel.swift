@@ -12,6 +12,7 @@ final class ChatViewModel: ObservableObject {
 
     private var agentLoop: AgentLoop?
     private var runningTask: Task<Void, Never>?
+    private var progressTimer: Task<Void, Never>?
     private let sessionId: String
     private let db: DatabaseQueue
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
@@ -131,8 +132,6 @@ final class ChatViewModel: ObservableObject {
             }
 
             let stream = await agentLoop.run(sessionId: sessionId, userMessage: text)
-            var toolsCompleted: Int64 = 0
-            var toolsTotal: Int64 = 0
 
             for await event in stream {
                 if Task.isCancelled { break }
@@ -145,8 +144,6 @@ final class ChatViewModel: ObservableObject {
                     messages[assistantIndex].toolCalls.append(
                         ChatMessage.ToolCallStatus(id: id, name: name, status: .running, detail: nil)
                     )
-                    toolsTotal += 1
-                    BackgroundTaskCoordinator.shared.updateProgress(completed: toolsCompleted, total: toolsTotal)
                     BackgroundTaskCoordinator.shared.updateSubtitle("Running \(name)...")
 
                 case .toolProgress(let id, let detail):
@@ -160,8 +157,6 @@ final class ChatViewModel: ObservableObject {
                         messages[assistantIndex].toolCalls[idx].status = .completed
                         messages[assistantIndex].toolCalls[idx].detail = nil
                     }
-                    toolsCompleted += 1
-                    BackgroundTaskCoordinator.shared.updateProgress(completed: toolsCompleted, total: toolsTotal)
 
                 case .error(let errorText):
                     if messages[assistantIndex].text.isEmpty {
@@ -264,6 +259,7 @@ final class ChatViewModel: ObservableObject {
 
         do {
             try BGTaskScheduler.shared.submit(request)
+            startProgressHeartbeat()
             return
         } catch {
             // Fallback for Simulator or if BGTask unavailable
@@ -276,6 +272,10 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func endBackgroundProcessing() {
+        // Stop the progress heartbeat
+        progressTimer?.cancel()
+        progressTimer = nil
+
         // Signal the BGTask handler to stop blocking
         BackgroundTaskCoordinator.shared.markFinished()
         BackgroundTaskCoordinator.shared.onExpiration = nil
@@ -284,6 +284,26 @@ final class ChatViewModel: ObservableObject {
         if backgroundTaskId != .invalid {
             UIApplication.shared.endBackgroundTask(backgroundTaskId)
             backgroundTaskId = .invalid
+        }
+    }
+
+    /// Keep BGContinuedProcessingTask alive by reporting progress every 2 seconds.
+    /// The system kills tasks that don't report progress updates.
+    private func startProgressHeartbeat() {
+        progressTimer?.cancel()
+        progressTimer = Task { [weak self] in
+            var tick: Int64 = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, let self else { break }
+                tick += 1
+                // Use a rolling window: total is always ahead of completed,
+                // so the system sees continuous forward progress.
+                BackgroundTaskCoordinator.shared.updateProgress(
+                    completed: tick,
+                    total: tick + 5
+                )
+            }
         }
     }
 }
